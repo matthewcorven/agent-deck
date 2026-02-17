@@ -89,3 +89,12 @@ Add GitHub Copilot CLI (`gh copilot`) as a first-class agent-deck tool with the 
 4) Wire status detection patterns + tests; refine after manual smoke.  
 5) Preflight checks + user-facing error strings.  
 6) Documentation updates (README, sample config, troubleshooting) and enable by default.
+
+## Phased Implementation Plan (execution)
+
+- **Phase 1 — Surface & config:** Wire Copilot into new-session/setup/settings/default_tool with icon/description. Add `[copilot]` TOML defaults + sample `tools.copilot` block. Exit: UI picker shows Copilot, config parses with defaults, docs updated. Tests: config parsing + settings UI snapshots if present.  
+- **Phase 2 — Command builder & session state:** Implement `CopilotOptions` + `buildCopilotCommand` with profile/mode/model/env handling; persist Copilot session ID/detected-at fields and tmux env export (no resume yet). Exit: unit tests for command construction/state persistence; session detail view shows stored Copilot metadata.  
+- **Phase 3 — Resume plumbing:** Detect Copilot session metadata (CLI JSON or cache) after spawn; pass resume flag when available; reattach on restart. Exit: tests covering resume argument logic and storage migrations; manual smoke: start session, restart app, resume without new prompt.  
+- **Phase 4 — Status detection:** Add busy/prompt/spinner patterns for Copilot into tmux detector plus overrides. Exit: `internal/tmux/patterns_test.go` covers Copilot patterns with no regressions to other tools; manual smoke confirms busy→prompt transitions.  
+- **Phase 5 — Preflight & UX:** Add install/auth checks (`gh`, extension, auth scopes) with actionable toasts/tooltips and settings link. Exit: simulated failures surface friendly errors; docs mention prerequisites/troubleshooting.  
+- **Phase 6 — Rollout & polish:** Update README/sample config/troubleshooting, ensure storage fields visible in session details, enable Copilot by default if stable. Exit: documentation merged, defaults gated/flagged as decided, smoke checklist completed.
