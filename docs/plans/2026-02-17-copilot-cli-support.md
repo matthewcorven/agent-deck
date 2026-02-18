@@ -89,3 +89,12 @@ Add GitHub Copilot CLI (`gh copilot`) as a first-class agent-deck tool with the 
 4) Wire status detection patterns + tests; refine after manual smoke.  
 5) Preflight checks + user-facing error strings.  
 6) Documentation updates (README, sample config, troubleshooting) and enable by default.
+
+## Viability questions + proof plan (2026-02-18)
+
+- **MCP integration:** Copilot CLI does not expose MCP/tool calls today. Action: confirm via `gh copilot --help` and extension source; if absent, mark MCP as unsupported and drop “Full” parity claim until GitHub ships it.
+- **Resume/fork:** Unclear whether chat sessions can be resumed or duplicated. Action: check for `gh copilot sessions`/`--session-id` flags, inspect extension cache (`~/.config/gh/copilot`), and prototype starting a pane with a stored ID; if not possible, document limitation and adjust matrix.
+- **Status detection:** Expected feasible but needs evidence. Action: record busy/prompt outputs from real chats, add to `tmux` pattern fixtures/tests, and verify no conflicts with existing tools.
+- **Preflight checks:** Likely fine but need concrete commands. Action: validate install/auth flows (`gh --version`, `gh extension list`, `gh auth status --check`, `gh copilot --help`) and define user-facing error strings.
+
+Exit criteria: each doubtful area has either a verified implementation approach or a documented limitation with a fallback integration level.
