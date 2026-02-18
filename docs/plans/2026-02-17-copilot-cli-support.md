@@ -4,6 +4,8 @@
 > Brainstorm perspectives: Architect, Implementer, Devil's Advocate, Release/Support  
 > Chosen approach: First-class Copilot tool (built-in parity with Claude/Gemini/OpenCode/Codex)
 
+> **Implementation guide:** The phased implementation plan has been broken out into self-contained docs for agent-friendly execution. See [copilot-cli/README.md](copilot-cli/README.md) for the index and individual phase instructions.
+
 ## Summary
 
 Add GitHub Copilot CLI (`copilot`) as a first-class agent-deck tool with the same UX/features as Claude, Gemini, OpenCode, and Codex: selectable in New Session/Setup Wizard, persisted session tracking/resume, status detection, configuration, and guardrails. The Copilot CLI is a standalone binary (`github/copilot-cli`, public preview) installed via `brew install copilot-cli` or `npm install -g @github/copilot`; the integration must handle install preflights and map Copilot's interactive TUI into tmux-managed sessions.
