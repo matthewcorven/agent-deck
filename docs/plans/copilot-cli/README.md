@@ -6,7 +6,7 @@
 
 Add `copilot` (GitHub Copilot CLI) as a first-class agent-deck tool with parity to Claude, Gemini, OpenCode, and Codex: selectable in New Session / Fork / Setup Wizard, persisted session tracking/resume, status detection, configuration, and preflight checks.
 
-Binary: `copilot` (standalone, `brew install copilot-cli` or `npm install -g @github/copilot`)
+Binary: `copilot` (standalone, `brew install copilot-cli@prerelease` or `npm install -g @github/copilot`)
 
 ## Non-Goals
 
@@ -52,6 +52,7 @@ These files are touched repeatedly across phases. Each phase doc lists exactly w
 | `internal/ui/styles.go` | `IconCopilot` constant, `ToolIcon`/`ToolColor` switch cases |
 | `internal/statedb/statedb.go` | `tool_data` JSON column (Copilot fields stored here) |
 | `internal/statedb/migrate.go` | `jsonInstanceData` Copilot fields (JSON migration struct) |
+| `skills/agent-deck/references/config-reference.md` | Public config docs — `[copilot]` section, TOC, complete example |
 
 ## Copilot CLI Command Reference (Quick)
 

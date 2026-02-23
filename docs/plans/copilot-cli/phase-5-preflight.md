@@ -9,7 +9,7 @@
 Other tools don't currently have explicit install checks — they either fail in tmux (showing a shell error) or rely on the user to have the binary installed. This phase adds a friendlier experience for Copilot specifically because:
 
 1. Copilot CLI is new and users are less likely to have it installed.
-2. The install path is straightforward (`brew install copilot-cli`).
+2. The install path is straightforward (`brew install copilot-cli@prerelease`).
 3. Auth is fully handled by the CLI itself (`/login`), so no external auth check needed.
 
 ## Files to Modify

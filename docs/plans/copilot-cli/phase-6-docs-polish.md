@@ -14,7 +14,7 @@ At this point, all functional code is in place. This phase covers the final docu
 
 Update `README.md`:
 - Add Copilot to the "Supported Tools" list (alongside Claude, Gemini, OpenCode, Codex)
-- Mention install prerequisite: `brew install copilot-cli`
+- Mention install prerequisite: `brew install copilot-cli@prerelease`
 - Add a brief example of starting a Copilot session
 
 ### 2. Sample config finalization
@@ -27,7 +27,7 @@ Add to README or a separate troubleshooting doc:
 
 | Issue | Solution |
 |-------|----------|
-| `copilot: command not found` | Install: `brew install copilot-cli` or `npm install -g @github/copilot` |
+| `copilot: command not found` | Install: `brew install copilot-cli@prerelease` or `npm install -g @github/copilot` |
 | Auth expired / not logged in | Run `copilot` and use `/login`, or set `GH_TOKEN` env var |
 | Session resume fails | Try `copilot --continue` manually; check `~/.copilot/` for session data |
 | Status bar not updating | Verify patterns match Copilot's output; check `config.toml` for pattern overrides |

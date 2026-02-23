@@ -13,7 +13,7 @@ Every other tool (Claude, Gemini, OpenCode, Codex) was integrated by first obser
 ### 1. Install & authenticate
 
 ```bash
-brew install copilot-cli   # or: npm install -g @github/copilot
+brew install copilot-cli@prerelease  # or: npm install -g @github/copilot
 copilot                     # launches interactive TUI; follow /login flow
 ```
 

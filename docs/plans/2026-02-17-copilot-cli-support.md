@@ -8,7 +8,7 @@
 
 ## Summary
 
-Add GitHub Copilot CLI (`copilot`) as a first-class agent-deck tool with the same UX/features as Claude, Gemini, OpenCode, and Codex: selectable in New Session/Setup Wizard, persisted session tracking/resume, status detection, configuration, and guardrails. The Copilot CLI is a standalone binary (`github/copilot-cli`, public preview) installed via `brew install copilot-cli` or `npm install -g @github/copilot`; the integration must handle install preflights and map Copilot's interactive TUI into tmux-managed sessions.
+Add GitHub Copilot CLI (`copilot`) as a first-class agent-deck tool with the same UX/features as Claude, Gemini, OpenCode, and Codex: selectable in New Session/Setup Wizard, persisted session tracking/resume, status detection, configuration, and guardrails. The Copilot CLI is a standalone binary (`github/copilot-cli`, public preview) installed via `brew install copilot-cli@prerelease` or `npm install -g @github/copilot`; the integration must handle install preflights and map Copilot's interactive TUI into tmux-managed sessions.
 
 ## Acceptance Criteria
 
@@ -64,7 +64,7 @@ Add GitHub Copilot CLI (`copilot`) as a first-class agent-deck tool with the sam
 ### Preflight & validation
 - Add install check in session start: `copilot version` or `which copilot` to confirm the binary is in PATH.  
 - Auth is handled by the CLI itself (`/login` on first launch, or `GH_TOKEN`/`GITHUB_TOKEN` env vars) — no external auth check needed.  
-- UI toasts for missing binary; link to install instructions (`brew install copilot-cli` / `npm install -g @github/copilot`).
+- UI toasts for missing binary; link to install instructions (`brew install copilot-cli@prerelease` / `npm install -g @github/copilot`).
 
 ### UI wiring
 - New session dialog: Copilot card with icon and description; model/agent overrides shown when tool selected.  
@@ -91,7 +91,7 @@ Add GitHub Copilot CLI (`copilot`) as a first-class agent-deck tool with the sam
 **Goal:** Eliminate the single unknown — what the Copilot CLI actually renders in tmux — and determine the session ID detection strategy before writing any code.
 
 **Tasks:**
-1. Install Copilot CLI (`brew install copilot-cli`), authenticate via `/login`.
+1. Install Copilot CLI (`brew install copilot-cli@prerelease`), authenticate via `/login`.
 2. Launch `copilot` inside a tmux pane; capture terminal content (`tmux capture-pane -p`) during each of these states:
    - Startup / welcome banner (note any session ID displayed)
    - Idle / awaiting input (the prompt line)
@@ -230,7 +230,7 @@ Add GitHub Copilot CLI (`copilot`) as a first-class agent-deck tool with the sam
 **Tasks:**
 1. Add install check in session start path: `which copilot` or `copilot version`.
 2. If binary is missing, surface a toast/tooltip with install instructions:
-   - macOS: `brew install copilot-cli`
+   - macOS: `brew install copilot-cli@prerelease`
    - npm: `npm install -g @github/copilot`
    - Script: `curl -fsSL https://gh.io/copilot-install | bash`
 3. No auth check needed — the CLI handles auth interactively on first launch via `/login`, or via `GH_TOKEN`/`GITHUB_TOKEN`/`COPILOT_GITHUB_TOKEN` env vars.
@@ -281,7 +281,7 @@ Add GitHub Copilot CLI (`copilot`) as a first-class agent-deck tool with the sam
 ## Viability Assessment (2026-02-18)
 
 > **Note:** This document has been updated to target the current GitHub Copilot CLI
-> (`github/copilot-cli`) -- a standalone binary installed via `brew install copilot-cli`
+> (`github/copilot-cli`) -- a standalone binary installed via `brew install copilot-cli@prerelease`
 > or `npm install -g @github/copilot`. The previously archived `gh copilot` extension
 > (archived Oct 30, 2025) is no longer referenced.
 
@@ -385,7 +385,7 @@ treating ACP as a future enhancement, not blocking v1.
 | Aspect | Detail |
 |--------|--------|
 | Binary | `copilot` |
-| Install | `brew install copilot-cli` / `npm i -g @github/copilot` |
+| Install | `brew install copilot-cli@prerelease` / `npm i -g @github/copilot` |
 | Auth | `/login` in CLI, or `GH_TOKEN`/`GITHUB_TOKEN` env var |
 | Config dir | `~/.copilot/` (override via `--config-dir` or `XDG_CONFIG_HOME`) |
 | Config file | `~/.copilot/config.json` |
@@ -426,6 +426,6 @@ the Codex or OpenCode integrations.
 
 ### Blocking Next Step
 
-Install Copilot CLI (`brew install copilot-cli`), authenticate, run a real session
+Install Copilot CLI (`brew install copilot-cli@prerelease`), authenticate, run a real session
 inside tmux, and capture terminal content during idle/thinking/approval states to
 finalize status detection patterns before implementation begins.
