@@ -117,6 +117,45 @@ grep -rn 'tool.*select\|tool.*picker\|tool.*list\|availableTools' internal/ui/
 
 In `userconfig.go`, the `default_tool` field validation (if any) should accept `"copilot"` as a valid value. Search for any validation that restricts allowed tool names.
 
+### 5. `skills/agent-deck/references/config-reference.md`
+
+**Add `[copilot]` section** to the config reference (after the `[codex]` section):
+
+- New `## [copilot] Section` heading with description
+- TOML example block showing all keys
+- Options table (`command`, `yolo_mode`, `default_model`, `default_agent`, `config_dir`, `env_file`)
+- Add `copilot=🛸` to the **Built-in icons** list in `[tools.*]` section
+- Add `"copilot"` as a valid value in the `default_tool` top-level docs
+- Add `[copilot]` to the **Complete Example** at the bottom
+- Add `[copilot]` to the **Table of Contents**
+
+Example section:
+
+```markdown
+## [copilot] Section
+
+GitHub Copilot CLI integration settings.
+
+\```toml
+[copilot]
+command = "copilot"        # Binary name or path
+yolo_mode = false           # Enable --yolo/--allow-all
+default_model = ""          # Model for new sessions
+default_agent = ""          # Custom agent profile
+config_dir = "~/.copilot"   # Config directory override
+env_file = ""               # Session-specific .env file
+\```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `command` | string | `"copilot"` | Copilot binary name or path. |
+| `yolo_mode` | bool | `false` | Maps to `copilot --yolo` / `--allow-all`. |
+| `default_model` | string | none | Model for new sessions (e.g., `"claude-sonnet-4-5"`). |
+| `default_agent` | string | none | Custom agent profile (`--agent`). |
+| `config_dir` | string | `"~/.copilot"` | Copilot config directory (`--config-dir`). |
+| `env_file` | string | none | `.env` file sourced for Copilot sessions. |
+```
+
 ## Tests to Add/Update
 
 - **Config parsing round-trip:** Add a test that parses a `config.toml` containing `[copilot]` section and verifies defaults.
@@ -171,3 +210,7 @@ env_file = "~/.copilot.env"
 - [ ] `default_tool = "copilot"` is accepted without error
 - [ ] Selecting Copilot in New Session doesn't crash (can be a no-op/error stub)
 - [ ] Config parsing tests pass
+- [ ] `skills/agent-deck/references/config-reference.md` has `[copilot]` section with all keys documented
+- [ ] Config reference Table of Contents includes `[copilot]`
+- [ ] Config reference Complete Example includes `[copilot]` section
+- [ ] Built-in icons list includes `copilot=🛸`
