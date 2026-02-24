@@ -4,15 +4,24 @@ All options for `~/.agent-deck/config.toml`.
 
 ## Table of Contents
 
-- [Top-Level](#top-level)
-- [[claude] Section](#claude-section)
-- [[codex] Section](#codex-section)
-- [[logs] Section](#logs-section)
-- [[updates] Section](#updates-section)
-- [[global_search] Section](#global_search-section)
-- [[mcp_pool] Section](#mcp_pool-section)
-- [[mcps.*] Section](#mcps-section)
-- [[tools.*] Section](#tools-section)
+- [Configuration Reference](#configuration-reference)
+  - [Table of Contents](#table-of-contents)
+  - [Top-Level](#top-level)
+  - [\[claude\] Section](#claude-section)
+    - [Multiple Claude accounts (per profile)](#multiple-claude-accounts-per-profile)
+  - [\[codex\] Section](#codex-section)
+  - [\[logs\] Section](#logs-section)
+  - [\[updates\] Section](#updates-section)
+  - [\[global\_search\] Section](#global_search-section)
+  - [\[mcp\_pool\] Section](#mcp_pool-section)
+  - [\[mcps.\*\] Section](#mcps-section)
+    - [STDIO MCPs (Local)](#stdio-mcps-local)
+    - [HTTP/SSE MCPs (Remote)](#httpsse-mcps-remote)
+    - [HTTP MCPs with Auto-Start Server](#http-mcps-with-auto-start-server)
+    - [Common MCP Examples](#common-mcp-examples)
+  - [\[tools.\*\] Section](#tools-section)
+  - [Complete Example](#complete-example)
+  - [Environment Variables](#environment-variables)
 
 ## Top-Level
 
