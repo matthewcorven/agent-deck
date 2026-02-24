@@ -45,3 +45,26 @@ Recommended the Phase 0 execution approach for Copilot CLI integration:
 - **Ripley** gates session ID extraction strategy before Phase 1 proceeds
 - Top risks: session ID detection (may not be exposed by Copilot CLI) and TUI rendering in tmux
 - Advisory only — no decisions recorded, no code changes
+
+### 2026-02-24 — Upstream Review (v0.19.2 → v0.19.14, 51 commits)
+
+**Reviewed 59 files, +5873/−807 lines.** Full analysis written to `.squad/decisions/inbox/ripley-upstream-review.md`.
+
+**Key findings affecting our Copilot integration:**
+- `expandHomePath()` → `ExpandPath()` (renamed+extended, handles `$HOME/${VAR}`). All phase docs referencing old name must update.
+- `resolveEnvFilePath()` → `resolvePath()` (renamed). Internal but our phase docs reference it.
+- `expandTilde()` in storage.go REMOVED entirely. Replaced with `fixMalformedTildePath()` + `ExpandPath()`.
+- `SetupConductor()` gained 6th parameter (`customPolicyMD`).
+- `sendMessageWhenReady()` now accepts `"idle"` as ready state alongside `"waiting"`.
+- New `GetLastResponseBestEffort()` — multi-fallback response retrieval. Must use for Copilot.
+- New `CapturePaneFresh()` in tmux — bypasses cache for reliable snapshots. Critical for Phase 0 captures and Phase 4 status detection.
+- New `resolveSessionCommand()` pipeline in CLI — our `detectTool("copilot")` must feed into this.
+- New transition daemon/notifier system — automatically detects Copilot sessions once Phase 4 status patterns exist.
+- New `SendSessionMessageReliable()` helper in send_helper.go.
+- New `ManageMCPJson *bool` config field — demonstrates nil-pointer-with-default pattern for optional booleans.
+- SQLite retry-on-busy wrapper (`migrateStateDBWithRetry`) protects against daemon contention.
+- TUI shortcuts remapped: m=MCP, s=Skills, M=Move, r=Rename, R=Restart, S=Settings.
+
+**Merge recommendation:** `git merge upstream/main` immediately. 4-5 file conflicts expected, all additive/resolvable. No rebase — preserves our commit history.
+
+**Phase docs needing update:** Phase 0 (minor), Phase 1 (high — ExpandPath, resolveSessionCommand), Phase 2 (high — command resolution pipeline), Phase 3 (medium — session recovery chain), Phase 4 (medium — idle status, CapturePaneFresh, transition daemon).
