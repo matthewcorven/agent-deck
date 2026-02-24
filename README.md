@@ -83,8 +83,17 @@ Try different approaches without losing context. Fork any Claude conversation in
 
 Attach MCP servers without touching config files. Need web search? Browser automation? Toggle them on per project or globally. Agent Deck handles the restart automatically.
 
-- Press `M` to open, `Space` to toggle, `Tab` to cycle scope (LOCAL/GLOBAL)
+- Press `m` to open, `Space` to toggle, `Tab` to cycle scope (LOCAL/GLOBAL), type to jump
 - Define your MCPs once in `~/.agent-deck/config.toml`, then toggle per session — see [Configuration Reference](skills/agent-deck/references/config-reference.md)
+
+### Skills Manager
+
+Attach/detach Claude skills per project with a managed pool workflow.
+
+- Press `s` to open Skills Manager for a Claude session
+- Available list is pool-only (`~/.agent-deck/skills/pool`) to keep attach/detach deterministic
+- Apply writes project state to `.agent-deck/skills.toml` and materializes into `.claude/skills`
+- Type-to-jump is supported in the dialog (same pattern as MCP Manager)
 
 ### MCP Socket Pool
 
@@ -107,7 +116,7 @@ Smart polling detects what every agent is doing right now:
 
 ### Notification Bar
 
-Waiting sessions appear right in your tmux status bar. Press `Ctrl+b 1-6` to jump directly to them.
+Waiting sessions appear right in your tmux status bar. Press `Ctrl+b`, release, then press `1`–`6` to jump directly to them.
 
 ```
 ⚡ [1] frontend [2] api [3] backend
@@ -207,7 +216,27 @@ ops: check the frontend session      → routes to conductor-ops (reply in threa
 
 Both Telegram and Slack can run simultaneously — the bridge daemon handles both concurrently and relays responses on-demand, plus periodic heartbeat alerts to configured platforms.
 
-**Heartbeat-driven monitoring**: Conductors are nudged every configured interval (default 15 minutes). If a conductor response includes `NEED:`, the bridge forwards that alert to Telegram and/or Slack.
+**Built-in status-driven notifications**: conductor setup also installs a transition notifier daemon (`agent-deck notify-daemon`) that watches status transitions and sends parent/conductor nudges when child sessions move `running -> waiting|error|idle`.
+
+**Heartbeat-driven monitoring**: heartbeats still run on the configured interval (default 15 minutes) as a secondary safety net. If a conductor response includes `NEED:`, the bridge forwards that alert to Telegram and/or Slack.
+
+**Legacy external watcher scripts**: optional only. `~/.agent-deck/events/` is not required for notification routing.
+
+**Launching sessions from inside a conductor**:
+
+```bash
+# Inherit current conductor as parent (default when AGENT_DECK_SESSION_ID is set)
+agent-deck -p work launch . -t "child-task" -c claude -m "Do task"
+
+# Keep parent notifications and still force a custom group
+agent-deck -p work launch . -t "review-phantom" -g ard -c claude -m "Review dataset"
+
+# Tool command with extra args is supported directly
+agent-deck -p work launch . -c "codex --dangerously-bypass-approvals-and-sandbox"
+```
+
+When `--cmd` includes extra args, agent-deck auto-wraps the tool command so args are preserved reliably.
+Use `--no-parent` only when you explicitly want to disable parent routing/notifications.
 
 ### Multi-Tool Support
 
@@ -280,6 +309,7 @@ agent-deck                        # Launch TUI
 agent-deck add . -c claude        # Add current dir with Claude
 agent-deck session fork my-proj   # Fork a Claude session
 agent-deck mcp attach my-proj exa # Attach MCP to session
+agent-deck skill attach my-proj docs --source pool --restart # Attach skill + restart
 agent-deck web                    # Start web UI on http://127.0.0.1:8420
 ```
 
@@ -317,7 +347,10 @@ agent-deck web --token my-secret
 | `Enter` | Attach to session |
 | `n` | New session |
 | `f` / `F` | Fork (quick / dialog) |
-| `M` | MCP Manager |
+| `m` | MCP Manager |
+| `s` | Skills Manager (Claude) |
+| `M` | Move session to group |
+| `S` | Settings |
 | `/` / `G` | Search / Global search |
 | `r` | Restart session |
 | `d` | Delete |
@@ -330,7 +363,7 @@ See [TUI Reference](skills/agent-deck/references/tui-reference.md) for all short
 | Guide | What's Inside |
 |-------|---------------|
 | [CLI Reference](skills/agent-deck/references/cli-reference.md) | Commands, flags, scripting examples |
-| [Configuration](skills/agent-deck/references/config-reference.md) | config.toml, MCP setup, custom tools, socket pool |
+| [Configuration](skills/agent-deck/references/config-reference.md) | config.toml, MCP setup, custom tools, socket pool, skills registry paths |
 | [TUI Reference](skills/agent-deck/references/tui-reference.md) | Keyboard shortcuts, status indicators, navigation |
 | [Troubleshooting](skills/agent-deck/references/troubleshooting.md) | Common issues, debugging, recovery, uninstalling |
 
@@ -341,7 +374,10 @@ Additional resources:
 
 ### Updates
 
-Agent Deck checks for updates automatically. Run `agent-deck update` to install, or set `auto_update = true` in [config.toml](skills/agent-deck/references/config-reference.md) for automatic updates.
+Agent Deck checks for updates automatically.
+- Standalone/manual install: run `agent-deck update` to install.
+- Homebrew install: run `brew upgrade asheshgoplani/tap/agent-deck`.
+- Optional: set `auto_update = true` in [config.toml](skills/agent-deck/references/config-reference.md) for automatic update prompts.
 
 ## FAQ
 

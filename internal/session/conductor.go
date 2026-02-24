@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -258,10 +259,28 @@ func ListConductorsForProfile(profile string) ([]ConductorMeta, error) {
 	return filtered, nil
 }
 
+func renderConductorClaudeTemplate(baseTemplate, name, profile string) string {
+	content := strings.ReplaceAll(baseTemplate, "{NAME}", name)
+	if profile == DefaultProfile {
+		// For default profile, show "default" in display text and omit -p flag in commands
+		content = strings.ReplaceAll(content, "{PROFILE}", "default")
+		content = strings.ReplaceAll(content, "agent-deck -p default ", "agent-deck ")
+		content = strings.ReplaceAll(content, "Always pass `-p default` to all CLI commands.", "Use CLI commands without `-p` flag (default profile).")
+	} else {
+		content = strings.ReplaceAll(content, "{PROFILE}", profile)
+	}
+	return content
+}
+
+func matchesTemplateContent(actual, expected string) bool {
+	return strings.TrimSuffix(actual, "\n") == strings.TrimSuffix(expected, "\n")
+}
+
 // SetupConductor creates the conductor directory, per-conductor CLAUDE.md, and meta.json.
 // If customClaudeMD is provided, creates a symlink instead of writing the template.
+// If customPolicyMD is provided, creates a per-conductor POLICY.md symlink (overrides the shared POLICY.md).
 // It does NOT register the session (that's done by the CLI handler which has access to storage).
-func SetupConductor(name, profile string, heartbeatEnabled bool, description string, customClaudeMD string) error {
+func SetupConductor(name, profile string, heartbeatEnabled bool, description string, customClaudeMD string, customPolicyMD string) error {
 	if err := ValidateConductorName(name); err != nil {
 		return err
 	}
@@ -291,18 +310,17 @@ func SetupConductor(name, profile string, heartbeatEnabled bool, description str
 		}
 	} else if info, err := os.Lstat(targetPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		// No custom path - write default template (but preserve existing symlink)
-		content := strings.ReplaceAll(conductorPerNameClaudeMDTemplate, "{NAME}", name)
-		if profile == DefaultProfile {
-			// For default profile, show "default" in display text and omit -p flag in commands
-			content = strings.ReplaceAll(content, "{PROFILE}", "default")
-			content = strings.ReplaceAll(content, "agent-deck -p default ", "agent-deck ")
-			content = strings.ReplaceAll(content, "Always pass `-p default` to all CLI commands.", "Use CLI commands without `-p` flag (default profile).")
-		} else {
-			content = strings.ReplaceAll(content, "{PROFILE}", profile)
-		}
-
+		content := renderConductorClaudeTemplate(conductorPerNameClaudeMDTemplate, name, profile)
 		if err := os.WriteFile(targetPath, []byte(content), 0o644); err != nil {
 			return fmt.Errorf("failed to write CLAUDE.md: %w", err)
+		}
+	}
+
+	// Write per-conductor POLICY.md symlink if custom path provided
+	if customPolicyMD != "" {
+		policyPath := filepath.Join(dir, "POLICY.md")
+		if err := createSymlinkWithExpansion(policyPath, customPolicyMD); err != nil {
+			return fmt.Errorf("failed to create POLICY.md symlink: %w", err)
 		}
 	}
 
@@ -318,6 +336,14 @@ func SetupConductor(name, profile string, heartbeatEnabled bool, description str
 		return fmt.Errorf("failed to write meta.json: %w", err)
 	}
 
+	// Write per-conductor LEARNINGS.md (don't overwrite existing)
+	learningsPath := filepath.Join(dir, "LEARNINGS.md")
+	if _, err := os.Stat(learningsPath); os.IsNotExist(err) {
+		if err := os.WriteFile(learningsPath, []byte(conductorLearningsTemplate), 0o644); err != nil {
+			return fmt.Errorf("failed to write LEARNINGS.md: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -331,13 +357,10 @@ func InstallHeartbeatScript(name, profile string) error {
 	profile = normalizeConductorProfile(profile)
 
 	script := strings.ReplaceAll(conductorHeartbeatScript, "{NAME}", name)
+	script = strings.ReplaceAll(script, "{PROFILE}", profile)
 	if profile == DefaultProfile {
 		// For default profile, omit -p flag entirely
-		script = strings.ReplaceAll(script, "{PROFILE}", "default")
 		script = strings.ReplaceAll(script, `-p "$PROFILE" `, "")
-		script = strings.ReplaceAll(script, `$PROFILE profile`, "default profile")
-	} else {
-		script = strings.ReplaceAll(script, "{PROFILE}", profile)
 	}
 	scriptPath := filepath.Join(dir, "heartbeat.sh")
 	return os.WriteFile(scriptPath, []byte(script), 0o755)
@@ -375,6 +398,7 @@ func GenerateHeartbeatPlist(name string, intervalMinutes int) (string, error) {
 	plist = strings.ReplaceAll(plist, "__LOG_PATH__", logPath)
 	plist = strings.ReplaceAll(plist, "__HOME__", homeDir)
 	plist = strings.ReplaceAll(plist, "__INTERVAL__", fmt.Sprintf("%d", intervalSeconds))
+	plist = strings.ReplaceAll(plist, "__PATH__", buildDaemonPath(agentDeckPath))
 
 	return plist, nil
 }
@@ -420,10 +444,27 @@ func findAgentDeck() string {
 	return ""
 }
 
+// buildDaemonPath returns a PATH string suitable for daemon environments.
+// If agentDeckPath is non-empty, its parent directory is prepended so daemon
+// processes (launchd, systemd) that don't inherit the user's shell PATH can
+// still find the agent-deck binary.
+func buildDaemonPath(agentDeckPath string) string {
+	base := "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+	if agentDeckPath == "" {
+		return base
+	}
+	dir := filepath.Dir(agentDeckPath)
+	// Avoid duplicating a directory already in base
+	if slices.Contains(strings.Split(base, ":"), dir) {
+		return base
+	}
+	return dir + ":" + base
+}
+
 // conductorHeartbeatScript is the shell script that sends a heartbeat to a conductor session
 const conductorHeartbeatScript = `#!/bin/bash
 # Heartbeat for conductor: {NAME} (profile: {PROFILE})
-# Sends a check-in message to the conductor session
+# Sends a check-in message to the conductor session (non-blocking)
 
 SESSION="conductor-{NAME}"
 PROFILE="{PROFILE}"
@@ -432,7 +473,7 @@ PROFILE="{PROFILE}"
 STATUS=$(agent-deck -p "$PROFILE" session show "$SESSION" --json 2>/dev/null | tr -d '\n' | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
 if [ "$STATUS" = "idle" ] || [ "$STATUS" = "waiting" ]; then
-    agent-deck -p "$PROFILE" session send "$SESSION" "Heartbeat: Check all sessions in the $PROFILE profile. List any waiting sessions, auto-respond where safe, and report what needs my attention."
+    agent-deck -p "$PROFILE" session send "$SESSION" "Heartbeat: Check all sessions in the {PROFILE} profile. List any waiting sessions, auto-respond where safe, and report what needs my attention." --no-wait -q
 fi
 `
 
@@ -465,7 +506,7 @@ const conductorHeartbeatPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>__PATH__</string>
         <key>HOME</key>
         <string>__HOME__</string>
     </dict>
@@ -479,21 +520,15 @@ const conductorHeartbeatPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 // SetupConductorProfile creates the conductor directory and CLAUDE.md for a profile.
 // Deprecated: Use SetupConductor instead. Kept for backward compatibility.
 func SetupConductorProfile(profile string) error {
-	return SetupConductor(profile, profile, true, "", "")
+	return SetupConductor(profile, profile, true, "", "", "")
 }
 
 // createSymlinkWithExpansion creates a symlink from target to source, with ~ expansion and validation.
 // target: the symlink path (e.g., ~/.agent-deck/conductor/CLAUDE.md)
 // source: the user's custom file path (e.g., ~/my/custom.md)
 func createSymlinkWithExpansion(target, source string) error {
-	// Expand ~ in source path
-	if strings.HasPrefix(source, "~/") {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to expand ~: %w", err)
-		}
-		source = filepath.Join(homeDir, source[2:])
-	}
+	// Expand environment variables and ~ in source path
+	source = ExpandPath(source)
 
 	// Validate source is absolute
 	if !filepath.IsAbs(source) {
@@ -502,7 +537,7 @@ func createSymlinkWithExpansion(target, source string) error {
 
 	// Check if source file exists
 	if _, err := os.Stat(source); os.IsNotExist(err) {
-		return fmt.Errorf("custom CLAUDE.md file does not exist: %s\nCreate the file first, then run setup again", source)
+		return fmt.Errorf("custom file does not exist: %s\nCreate the file first, then run setup again", source)
 	}
 
 	// Remove existing file/symlink at target
@@ -542,6 +577,52 @@ func InstallSharedClaudeMD(customPath string) error {
 	}
 	if err := os.WriteFile(targetPath, []byte(conductorSharedClaudeMDTemplate), 0o644); err != nil {
 		return fmt.Errorf("failed to write shared CLAUDE.md: %w", err)
+	}
+	return nil
+}
+
+// InstallLearningsMD writes the default LEARNINGS.md to the conductor base directory.
+// This is the shared (Tier 1) learnings file for generic patterns across all conductors.
+func InstallLearningsMD() error {
+	dir, err := ConductorDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	targetPath := filepath.Join(dir, "LEARNINGS.md")
+	// Don't overwrite if already exists (preserves user entries)
+	if _, err := os.Stat(targetPath); err == nil {
+		return nil
+	}
+	return os.WriteFile(targetPath, []byte(conductorLearningsTemplate), 0o644)
+}
+
+// InstallPolicyMD writes the default POLICY.md to the conductor base directory,
+// or creates a symlink if customPath is provided.
+// This contains agent behavior rules (auto-response policy, escalation guidelines).
+func InstallPolicyMD(customPath string) error {
+	dir, err := ConductorDir()
+	if err != nil {
+		return err
+	}
+	targetPath := filepath.Join(dir, "POLICY.md")
+
+	if customPath != "" {
+		// Custom path provided - create symlink
+		return createSymlinkWithExpansion(targetPath, customPath)
+	}
+
+	// No custom path - write default template (but preserve existing symlink)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	if info, err := os.Lstat(targetPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+	if err := os.WriteFile(targetPath, []byte(conductorPolicyTemplate), 0o644); err != nil {
+		return fmt.Errorf("failed to write POLICY.md: %w", err)
 	}
 	return nil
 }
@@ -613,6 +694,223 @@ func MigrateLegacyConductors() ([]string, error) {
 	return migrated, nil
 }
 
+// MigrateConductorPolicySplit updates legacy generated per-conductor CLAUDE.md
+// templates to include POLICY.md instructions.
+// It only rewrites non-symlink CLAUDE.md files that exactly match the legacy generated template.
+func MigrateConductorPolicySplit() ([]string, error) {
+	base, err := ConductorDir()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read conductor directory: %w", err)
+	}
+
+	var migrated []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		claudePath := filepath.Join(base, name, "CLAUDE.md")
+
+		info, err := os.Lstat(claudePath)
+		if err != nil {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+
+		meta, err := LoadConductorMeta(name)
+		if err != nil {
+			continue
+		}
+
+		contentBytes, err := os.ReadFile(claudePath)
+		if err != nil {
+			continue
+		}
+		content := string(contentBytes)
+
+		// Already on the new template format (or custom file with policy instructions).
+		if strings.Contains(content, "## Policy") && strings.Contains(content, "POLICY.md") {
+			continue
+		}
+
+		legacyTemplate := renderConductorClaudeTemplate(conductorPerNameClaudeMDLegacyTemplate, name, meta.Profile)
+		if !matchesTemplateContent(content, legacyTemplate) {
+			continue
+		}
+
+		updatedTemplate := renderConductorClaudeTemplate(conductorPerNameClaudeMDTemplate, name, meta.Profile)
+		if err := os.WriteFile(claudePath, []byte(updatedTemplate), 0o644); err != nil {
+			return migrated, fmt.Errorf("failed to migrate %s CLAUDE.md: %w", name, err)
+		}
+		migrated = append(migrated, name)
+	}
+
+	return migrated, nil
+}
+
+// MigrateConductorLearnings backfills LEARNINGS.md files for existing conductors and
+// updates per-conductor CLAUDE.md startup checklists to include the LEARNINGS.md reading step.
+// It only rewrites non-symlink CLAUDE.md files that exactly match the pre-learnings generated template.
+// Returns the names of conductors that were updated.
+func MigrateConductorLearnings() ([]string, error) {
+	base, err := ConductorDir()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read conductor directory: %w", err)
+	}
+
+	var migrated []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		dir := filepath.Join(base, name)
+
+		// Must have meta.json (is a conductor)
+		meta, err := LoadConductorMeta(name)
+		if err != nil {
+			continue
+		}
+
+		changed := false
+
+		// 1. Create LEARNINGS.md if missing
+		learningsPath := filepath.Join(dir, "LEARNINGS.md")
+		if _, err := os.Stat(learningsPath); os.IsNotExist(err) {
+			if err := os.WriteFile(learningsPath, []byte(conductorLearningsTemplate), 0o644); err == nil {
+				changed = true
+			}
+		}
+
+		// 2. Update CLAUDE.md startup checklist (only for non-symlink, exact template matches)
+		claudePath := filepath.Join(dir, "CLAUDE.md")
+		info, err := os.Lstat(claudePath)
+		if err != nil {
+			if changed {
+				migrated = append(migrated, name)
+			}
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			if changed {
+				migrated = append(migrated, name)
+			}
+			continue
+		}
+
+		contentBytes, err := os.ReadFile(claudePath)
+		if err != nil {
+			if changed {
+				migrated = append(migrated, name)
+			}
+			continue
+		}
+		content := string(contentBytes)
+
+		// Already has learnings step
+		if strings.Contains(content, "LEARNINGS.md") {
+			if changed {
+				migrated = append(migrated, name)
+			}
+			continue
+		}
+
+		preLearnings := renderConductorClaudeTemplate(conductorPerNameClaudeMDPreLearningsTemplate, name, meta.Profile)
+		if !matchesTemplateContent(content, preLearnings) {
+			if changed {
+				migrated = append(migrated, name)
+			}
+			continue
+		}
+
+		updated := renderConductorClaudeTemplate(conductorPerNameClaudeMDTemplate, name, meta.Profile)
+		if err := os.WriteFile(claudePath, []byte(updated), 0o644); err != nil {
+			return migrated, fmt.Errorf("failed to migrate %s CLAUDE.md: %w", name, err)
+		}
+		changed = true
+
+		if changed {
+			migrated = append(migrated, name)
+		}
+	}
+
+	// Also create shared LEARNINGS.md if missing
+	sharedPath := filepath.Join(base, "LEARNINGS.md")
+	if _, err := os.Stat(sharedPath); os.IsNotExist(err) {
+		_ = os.WriteFile(sharedPath, []byte(conductorLearningsTemplate), 0o644)
+	}
+
+	return migrated, nil
+}
+
+// MigrateConductorHeartbeatScripts refreshes managed heartbeat scripts to the
+// current template without touching custom user-authored scripts.
+func MigrateConductorHeartbeatScripts() ([]string, error) {
+	conductors, err := ListConductors()
+	if err != nil {
+		return nil, err
+	}
+
+	var migrated []string
+	for _, meta := range conductors {
+		dir, err := ConductorNameDir(meta.Name)
+		if err != nil {
+			continue
+		}
+
+		scriptPath := filepath.Join(dir, "heartbeat.sh")
+		expected := strings.ReplaceAll(conductorHeartbeatScript, "{NAME}", meta.Name)
+		expected = strings.ReplaceAll(expected, "{PROFILE}", normalizeConductorProfile(meta.Profile))
+		if normalizeConductorProfile(meta.Profile) == DefaultProfile {
+			expected = strings.ReplaceAll(expected, `-p "$PROFILE" `, "")
+		}
+
+		existing, err := os.ReadFile(scriptPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				if writeErr := os.WriteFile(scriptPath, []byte(expected), 0o755); writeErr == nil {
+					migrated = append(migrated, meta.Name)
+				}
+			}
+			continue
+		}
+
+		existingStr := string(existing)
+		managedScript := strings.Contains(existingStr, "# Heartbeat for conductor:") &&
+			strings.Contains(existingStr, `SESSION="conductor-`)
+		if !managedScript {
+			continue
+		}
+
+		if strings.TrimSpace(existingStr) == strings.TrimSpace(expected) {
+			continue
+		}
+
+		if err := os.WriteFile(scriptPath, []byte(expected), 0o755); err != nil {
+			return migrated, fmt.Errorf("failed to refresh heartbeat script for %s: %w", meta.Name, err)
+		}
+		migrated = append(migrated, meta.Name)
+	}
+
+	return migrated, nil
+}
+
 // InstallBridgeScript copies bridge.py to the conductor base directory.
 // It writes from the embedded const.
 func InstallBridgeScript() error {
@@ -645,6 +943,9 @@ func GetConductorSettings() ConductorSettings {
 // LaunchdPlistName is the launchd label for the conductor bridge daemon
 const LaunchdPlistName = "com.agentdeck.conductor-bridge"
 
+// TransitionNotifierLaunchdPlistName is the launchd label for the transition notifier daemon.
+const TransitionNotifierLaunchdPlistName = "com.agentdeck.transition-notifier"
+
 // GenerateLaunchdPlist returns a launchd plist with paths substituted
 func GenerateLaunchdPlist() (string, error) {
 	condDir, err := ConductorDir()
@@ -670,6 +971,8 @@ func GenerateLaunchdPlist() (string, error) {
 	plist = strings.ReplaceAll(plist, "__BRIDGE_PATH__", bridgePath)
 	plist = strings.ReplaceAll(plist, "__LOG_PATH__", logPath)
 	plist = strings.ReplaceAll(plist, "__HOME__", homeDir)
+	agentDeckPath := findAgentDeck()
+	plist = strings.ReplaceAll(plist, "__PATH__", buildDaemonPath(agentDeckPath))
 
 	return plist, nil
 }
@@ -683,21 +986,24 @@ func LaunchdPlistPath() (string, error) {
 	return filepath.Join(homeDir, "Library", "LaunchAgents", LaunchdPlistName+".plist"), nil
 }
 
-// findPython3 looks for python3 in common locations
+// findPython3 resolves python3 for daemon configs.
+// Prefer the current PATH (so pyenv/asdf-selected interpreters win),
+// then fall back to common absolute locations for non-interactive environments.
 func findPython3() string {
+	// Respect the user's current shell environment first.
+	if p, err := exec.LookPath("python3"); err == nil {
+		if abs, absErr := filepath.Abs(p); absErr == nil {
+			return abs
+		}
+		return p
+	}
+
 	paths := []string{
 		"/opt/homebrew/bin/python3",
 		"/usr/local/bin/python3",
 		"/usr/bin/python3",
 	}
 	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	// Try PATH lookup
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		p := filepath.Join(dir, "python3")
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
@@ -737,7 +1043,7 @@ const conductorPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>__PATH__</string>
         <key>HOME</key>
         <string>__HOME__</string>
     </dict>
@@ -747,6 +1053,48 @@ const conductorPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 
     <key>LowPriorityIO</key>
     <true/>
+</dict>
+</plist>
+`
+
+const transitionNotifierPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.agentdeck.transition-notifier</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__AGENT_DECK__</string>
+        <string>notify-daemon</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_PATH__</string>
+
+    <key>StandardErrorPath</key>
+    <string>__LOG_PATH__</string>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__PATH__</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
 </dict>
 </plist>
 `
@@ -765,7 +1113,26 @@ RestartSec=10
 WorkingDirectory=__HOME__
 StandardOutput=append:__LOG_PATH__
 StandardError=append:__LOG_PATH__
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PATH=__PATH__
+Environment=HOME=__HOME__
+
+[Install]
+WantedBy=default.target
+`
+
+const systemdTransitionNotifierServiceTemplate = `[Unit]
+Description=Agent Deck Transition Notifier
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=__AGENT_DECK__ notify-daemon
+Restart=always
+RestartSec=5
+WorkingDirectory=__HOME__
+StandardOutput=append:__LOG_PATH__
+StandardError=append:__LOG_PATH__
+Environment=PATH=__PATH__
 Environment=HOME=__HOME__
 
 [Install]
@@ -790,13 +1157,14 @@ Description=Agent Deck Conductor Heartbeat (__NAME__)
 Type=oneshot
 ExecStart=/bin/bash __SCRIPT_PATH__
 WorkingDirectory=__HOME__
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PATH=__PATH__
 Environment=HOME=__HOME__
 `
 
 // --- Systemd path helpers ---
 
 const systemdBridgeServiceName = "agent-deck-conductor-bridge.service"
+const systemdTransitionNotifierServiceName = "agent-deck-transition-notifier.service"
 
 // SystemdUserDir returns the systemd user unit directory (~/.config/systemd/user/)
 func SystemdUserDir() (string, error) {
@@ -814,6 +1182,15 @@ func SystemdBridgeServicePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, systemdBridgeServiceName), nil
+}
+
+// SystemdTransitionNotifierServicePath returns the full path to the transition notifier service file.
+func SystemdTransitionNotifierServicePath() (string, error) {
+	dir, err := SystemdUserDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, systemdTransitionNotifierServiceName), nil
 }
 
 // SystemdHeartbeatServiceName returns the systemd service name for a conductor heartbeat
@@ -867,6 +1244,65 @@ func GenerateSystemdBridgeService() (string, error) {
 	unit = strings.ReplaceAll(unit, "__BRIDGE_PATH__", bridgePath)
 	unit = strings.ReplaceAll(unit, "__LOG_PATH__", logPath)
 	unit = strings.ReplaceAll(unit, "__HOME__", homeDir)
+	agentDeckPath := findAgentDeck()
+	unit = strings.ReplaceAll(unit, "__PATH__", buildDaemonPath(agentDeckPath))
+	return unit, nil
+}
+
+// GenerateTransitionNotifierLaunchdPlist returns a launchd plist for the transition notifier daemon.
+func GenerateTransitionNotifierLaunchdPlist() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	agentDeckDir, err := GetAgentDeckDir()
+	if err != nil {
+		return "", err
+	}
+	agentDeckPath := findAgentDeck()
+	execPath := "agent-deck"
+	if agentDeckPath != "" {
+		execPath = agentDeckPath
+	}
+	logPath := filepath.Join(agentDeckDir, "logs", "transition-notifier.log")
+
+	plist := strings.ReplaceAll(transitionNotifierPlistTemplate, "__AGENT_DECK__", execPath)
+	plist = strings.ReplaceAll(plist, "__LOG_PATH__", logPath)
+	plist = strings.ReplaceAll(plist, "__HOME__", homeDir)
+	plist = strings.ReplaceAll(plist, "__PATH__", buildDaemonPath(agentDeckPath))
+	return plist, nil
+}
+
+// TransitionNotifierLaunchdPlistPath returns the launchd plist path for transition notifier.
+func TransitionNotifierLaunchdPlistPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(homeDir, "Library", "LaunchAgents", TransitionNotifierLaunchdPlistName+".plist"), nil
+}
+
+// GenerateSystemdTransitionNotifierService returns the systemd unit content for transition notifier.
+func GenerateSystemdTransitionNotifierService() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	agentDeckDir, err := GetAgentDeckDir()
+	if err != nil {
+		return "", err
+	}
+	agentDeckPath := findAgentDeck()
+	execPath := "agent-deck"
+	if agentDeckPath != "" {
+		execPath = agentDeckPath
+	}
+	logPath := filepath.Join(agentDeckDir, "logs", "transition-notifier.log")
+
+	unit := strings.ReplaceAll(systemdTransitionNotifierServiceTemplate, "__AGENT_DECK__", execPath)
+	unit = strings.ReplaceAll(unit, "__LOG_PATH__", logPath)
+	unit = strings.ReplaceAll(unit, "__HOME__", homeDir)
+	unit = strings.ReplaceAll(unit, "__PATH__", buildDaemonPath(agentDeckPath))
 	return unit, nil
 }
 
@@ -892,6 +1328,8 @@ func GenerateSystemdHeartbeatService(name string) (string, error) {
 	unit := strings.ReplaceAll(systemdHeartbeatServiceTemplate, "__NAME__", name)
 	unit = strings.ReplaceAll(unit, "__SCRIPT_PATH__", scriptPath)
 	unit = strings.ReplaceAll(unit, "__HOME__", homeDir)
+	agentDeckPath := findAgentDeck()
+	unit = strings.ReplaceAll(unit, "__PATH__", buildDaemonPath(agentDeckPath))
 	return unit, nil
 }
 
@@ -991,6 +1429,73 @@ func installBridgeDaemonSystemd() (string, error) {
 	return unitPath, nil
 }
 
+// InstallTransitionNotifierDaemon installs and starts the transition notifier daemon.
+func InstallTransitionNotifierDaemon() (string, error) {
+	plat := platform.Detect()
+	switch plat {
+	case platform.PlatformMacOS:
+		return installTransitionNotifierLaunchd()
+	case platform.PlatformLinux, platform.PlatformWSL2:
+		return installTransitionNotifierSystemd()
+	default:
+		return "", fmt.Errorf("unsupported platform %s for daemon management", plat)
+	}
+}
+
+func installTransitionNotifierLaunchd() (string, error) {
+	plistContent, err := GenerateTransitionNotifierLaunchdPlist()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate notifier plist: %w", err)
+	}
+	plistPath, err := TransitionNotifierLaunchdPlistPath()
+	if err != nil {
+		return "", fmt.Errorf("failed to get notifier plist path: %w", err)
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Join(homeDir, "Library", "LaunchAgents"), 0o755); err != nil {
+		return "", fmt.Errorf("failed to create LaunchAgents dir: %w", err)
+	}
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	if err := os.WriteFile(plistPath, []byte(plistContent), 0o644); err != nil {
+		return "", fmt.Errorf("failed to write notifier plist: %w", err)
+	}
+	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
+		return plistPath, fmt.Errorf("plist written but failed to load notifier daemon: %w", err)
+	}
+	return plistPath, nil
+}
+
+func installTransitionNotifierSystemd() (string, error) {
+	unitContent, err := GenerateSystemdTransitionNotifierService()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate notifier unit: %w", err)
+	}
+	unitPath, err := SystemdTransitionNotifierServicePath()
+	if err != nil {
+		return "", fmt.Errorf("failed to get notifier unit path: %w", err)
+	}
+	dir, err := SystemdUserDir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create systemd user dir: %w", err)
+	}
+	if err := os.WriteFile(unitPath, []byte(unitContent), 0o644); err != nil {
+		return "", fmt.Errorf("failed to write notifier unit: %w", err)
+	}
+	if !systemdUserAvailable() {
+		return "", fmt.Errorf("systemd user session not available; run manually: agent-deck notify-daemon")
+	}
+	if err := exec.Command("systemctl", "--user", "enable", "--now", systemdTransitionNotifierServiceName).Run(); err != nil {
+		return unitPath, fmt.Errorf("unit written but enable failed: %w", err)
+	}
+	return unitPath, nil
+}
+
 // UninstallBridgeDaemon stops and removes the bridge daemon.
 func UninstallBridgeDaemon() error {
 	plat := platform.Detect()
@@ -1032,6 +1537,47 @@ func uninstallBridgeDaemonSystemd() error {
 	return nil
 }
 
+// UninstallTransitionNotifierDaemon stops and removes the transition notifier daemon.
+func UninstallTransitionNotifierDaemon() error {
+	plat := platform.Detect()
+	switch plat {
+	case platform.PlatformMacOS:
+		return uninstallTransitionNotifierLaunchd()
+	case platform.PlatformLinux, platform.PlatformWSL2:
+		return uninstallTransitionNotifierSystemd()
+	default:
+		return nil
+	}
+}
+
+func uninstallTransitionNotifierLaunchd() error {
+	plistPath, err := TransitionNotifierLaunchdPlistPath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
+		return nil
+	}
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	return os.Remove(plistPath)
+}
+
+func uninstallTransitionNotifierSystemd() error {
+	_ = exec.Command("systemctl", "--user", "disable", "--now", systemdTransitionNotifierServiceName).Run()
+	unitPath, err := SystemdTransitionNotifierServicePath()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(unitPath); os.IsNotExist(err) {
+		return nil
+	}
+	if err := os.Remove(unitPath); err != nil {
+		return err
+	}
+	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+	return nil
+}
+
 // IsBridgeDaemonRunning checks if the bridge daemon is currently running.
 func IsBridgeDaemonRunning() bool {
 	plat := platform.Detect()
@@ -1041,6 +1587,21 @@ func IsBridgeDaemonRunning() bool {
 		return err == nil && len(out) > 0
 	case platform.PlatformLinux, platform.PlatformWSL2:
 		err := exec.Command("systemctl", "--user", "is-active", "--quiet", systemdBridgeServiceName).Run()
+		return err == nil
+	default:
+		return false
+	}
+}
+
+// IsTransitionNotifierDaemonRunning checks if transition notifier daemon is running.
+func IsTransitionNotifierDaemonRunning() bool {
+	plat := platform.Detect()
+	switch plat {
+	case platform.PlatformMacOS:
+		out, err := exec.Command("launchctl", "list", TransitionNotifierLaunchdPlistName).Output()
+		return err == nil && len(out) > 0
+	case platform.PlatformLinux, platform.PlatformWSL2:
+		err := exec.Command("systemctl", "--user", "is-active", "--quiet", systemdTransitionNotifierServiceName).Run()
 		return err == nil
 	default:
 		return false
@@ -1074,6 +1635,34 @@ func BridgeDaemonHint() string {
 	default:
 		condDir, _ := ConductorDir()
 		return fmt.Sprintf("Run manually: python3 %s/bridge.py", condDir)
+	}
+}
+
+// TransitionNotifierDaemonHint returns how to start transition notifier daemon.
+func TransitionNotifierDaemonHint() string {
+	plat := platform.Detect()
+	switch plat {
+	case platform.PlatformMacOS:
+		plistPath, err := TransitionNotifierLaunchdPlistPath()
+		if err == nil {
+			if _, err := os.Stat(plistPath); err == nil {
+				return fmt.Sprintf("Start notifier daemon with: launchctl load %s", plistPath)
+			}
+		}
+		return "Run 'agent-deck conductor setup <name>' to install notifier daemon"
+	case platform.PlatformLinux, platform.PlatformWSL2:
+		if !systemdUserAvailable() {
+			return "Run notifier manually: agent-deck notify-daemon"
+		}
+		unitPath, err := SystemdTransitionNotifierServicePath()
+		if err == nil {
+			if _, err := os.Stat(unitPath); err == nil {
+				return "Start notifier daemon with: systemctl --user start agent-deck-transition-notifier"
+			}
+		}
+		return "Run 'agent-deck conductor setup <name>' to install notifier daemon"
+	default:
+		return "Run notifier manually: agent-deck notify-daemon"
 	}
 }
 

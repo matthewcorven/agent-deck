@@ -5,6 +5,122 @@ All notable changes to Agent Deck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.14] - 2026-02-24
+
+### Added
+
+- Add automatic heartbeat script migration for existing conductors so managed `heartbeat.sh` files are refreshed to the current generated template during conductor migration checks.
+- Add `--cmd` parsing support for tool commands with inline args in `add`/`launch` (for example `-c "codex --dangerously-bypass-approvals-and-sandbox"`), with automatic wrapper generation when needed.
+
+### Fixed
+
+- Switch generated conductor heartbeat sends to non-blocking `session send --no-wait -q`, eliminating recurring `agent not ready after 80 seconds` timeout churn for busy conductors.
+- Improve `add`/`launch` CLI help and JSON output to expose resolved command/wrapper details and avoid confusing launch behavior when mixing tool names with extra args.
+- Fix parent/group friction for conductor-launched sessions by allowing explicit `-g/--group` to override inherited parent group while keeping parent linkage for notifications.
+
+### Changed
+
+- Expand README and CLI reference guidance for conductor-launched sessions (`--no-parent` vs auto-parent), transition notifier behavior, and safe command patterns.
+
+## [0.19.13] - 2026-02-24
+
+### Added
+
+- Add built-in event-driven transition notifications (`notify-daemon`) that nudge a parent session first, then fall back to a conductor session when a child transitions from `running` to `waiting`/`error`/`idle`.
+- Add `--no-parent` and default auto-parent linking for `add`/`launch` when launched from a managed session (`AGENT_DECK_SESSION_ID`), with conflict protection for `--parent` + `--no-parent`.
+- Add `parent_session_id` and `parent_project_path` to `agent-deck session show --json`.
+- Add conductor setup/status/teardown integration for the transition notifier daemon so always-on notifications can be installed and managed with conductor commands.
+
+### Fixed
+
+- Reduce SQLite lock contention under concurrent daemon and CLI usage by avoiding unnecessary schema-version writes and retrying transient busy errors during storage migration/open.
+- Improve status-driven notification reliability for fast tool completions by combining watcher updates with direct hook-file fallback reads and hook-based terminal transition candidates.
+
+## [0.19.11] - 2026-02-23
+
+### Added
+
+- Add shared and per-conductor `LEARNINGS.md` support with setup/migration wiring so conductors can capture reusable orchestration lessons over time.
+
+### Fixed
+
+- Harden `launch -m` and `session send` message delivery for Claude by using fresh pane captures, robust composer prompt parsing (including wrapped prompts), and stronger Enter retry verification to avoid pasted-but-unsent prompts.
+- Improve readiness detection for non-Claude tools (including Codex) by treating stable `idle`/`waiting` states as ready, preventing false startup timeouts when launching with an initial message.
+- Fix launch/session-start messaging semantics so non-`--no-wait` flows correctly report message sent state (`message_pending=false`).
+
+## [0.19.10] - 2026-02-23
+
+### Fixed
+
+- Make `agent-deck session send --wait` and `agent-deck session output` resilient when Claude session IDs are missing/stale by using best-effort response recovery (tmux env refresh, disk sync fallback, and terminal parse fallback).
+- Improve Claude send verification to catch pasted-but-unsent prompts even after an initial `waiting` state, reducing false positives where a prompt was pasted but never submitted.
+- Update conductor bridge messaging to use single-call `session send --wait -q --timeout ...` flow for Telegram/Slack and heartbeat handling, reducing extra polling steps and improving reliability.
+- Reject non-directory legacy file skills when attaching project skills, and harden skill materialization to recover from broken symlinks and symlinked target-path edge cases.
+
+### Changed
+
+- Update conductor templates/docs and launcher helper scripts to prefer one-shot launch/send flows and single-call wait semantics for smoother orchestration.
+
+## [0.19.9] - 2026-02-20
+
+### Fixed
+
+- Fix terminal style leakage after tmux attach by waiting for PTY output to drain and resetting OSC-8/SGR styles before the TUI redraws.
+- Harden `agent-deck session send` delivery by retrying `Enter` only when Claude shows a pasted-but-unsent marker (`[Pasted text ...]`) and avoiding unnecessary retries once status is already `waiting`/`idle`.
+
+### Changed
+
+- Clarify tmux wait-bar shortcut docs: press `Ctrl+b`, release, then press `1`–`6` to jump to waiting sessions.
+
+## [0.19.8] - 2026-02-20
+
+### Fixed
+
+- Fix `agent-deck session show --json` MCP output marshalling by emitting concrete local/global/project values instead of a method reference in `mcps.local` (#213).
+- Fix conductor daemon Python resolution by preferring `python3` from the active shell `PATH` before fallback absolute paths (#215).
+
+## [0.19.7] - 2026-02-20
+
+### Fixed
+
+- Fix heartbeat script profile text stamping so generated `heartbeat.sh` uses the real profile name in message text for non-default profiles (#207, contributed by @CoderNoveau).
+- Fix conductor bridge message delivery when the conductor session is idle by using non-blocking `session send --no-wait`, and apply this in the embedded runtime bridge template with regression coverage (#210, contributed by @sjoeboo).
+
+## [0.19.6] - 2026-02-19
+
+### Added
+
+- Add `manage_mcp_json` config option to disable all `.mcp.json` writes, plus a LOCAL-scope MCP Manager warning when disabled (#197, contributed by @sjoeboo).
+- Split conductor guidance into shared mechanism (`CLAUDE.md`) and policy (`POLICY.md`) with per-conductor policy override support (#201).
+
+### Fixed
+
+- Fix conductor setup migration so legacy generated per-conductor `CLAUDE.md` files are updated safely for the policy split while preserving custom and symlinked files (#201).
+- Fix launchd and systemd conductor daemon units to include the installed `agent-deck` binary directory in `PATH` so bridge/heartbeat jobs can find the CLI (#196, contributed by @sjoeboo).
+- Support environment variable expansion (`$VAR`, `${VAR}`) in path-based config values and unify path expansion behavior across config consumers (#194, contributed by @tiwillia).
+
+## [0.19.5] - 2026-02-18
+
+### Changed
+
+- Remap TUI shortcuts to reduce conflicts: `m` opens MCP Manager, `s` opens Skills Manager (Claude), and `M` moves sessions between groups.
+
+### Fixed
+
+- Reduce Codex session watcher CPU usage by rate-limiting expensive on-disk session scans and avoiding redundant tmux environment writes.
+- Fix macOS installer crash on default Bash 3.2 by replacing associative arrays in `install.sh` with Bash 3.2 compatible helper functions (#192, contributed by @slkiser).
+
+## [0.19.4] - 2026-02-18
+
+### Added
+
+- Add pool-focused type-to-jump navigation and scrolling in the Skills Manager (`P`) dialog for long lists.
+- Add stricter Skills Manager available list behavior so project attach/detach is driven by the managed pool source.
+
+### Changed
+
+- Update README and skill references with Skills Manager usage, skill CLI command coverage, and skills registry path documentation.
+
 ## [0.19.0] - 2026-02-17
 
 ### Added

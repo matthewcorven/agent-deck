@@ -42,13 +42,38 @@ func handleConductor(profile string, args []string) {
 
 // runAutoMigration runs legacy conductor migration and prints results
 func runAutoMigration(jsonOutput bool) {
-	migrated, err := session.MigrateLegacyConductors()
+	migratedLegacy, err := session.MigrateLegacyConductors()
 	if err != nil && !jsonOutput {
 		fmt.Fprintf(os.Stderr, "Warning: migration check failed: %v\n", err)
 	}
+
+	migratedPolicy, err := session.MigrateConductorPolicySplit()
+	if err != nil && !jsonOutput {
+		fmt.Fprintf(os.Stderr, "Warning: policy migration check failed: %v\n", err)
+	}
+
+	migratedLearnings, err := session.MigrateConductorLearnings()
+	if err != nil && !jsonOutput {
+		fmt.Fprintf(os.Stderr, "Warning: learnings migration check failed: %v\n", err)
+	}
+
+	migratedHeartbeatScripts, err := session.MigrateConductorHeartbeatScripts()
+	if err != nil && !jsonOutput {
+		fmt.Fprintf(os.Stderr, "Warning: heartbeat script migration check failed: %v\n", err)
+	}
+
 	if !jsonOutput {
-		for _, name := range migrated {
+		for _, name := range migratedLegacy {
 			fmt.Printf("  [migrated] Legacy conductor: %s\n", name)
+		}
+		for _, name := range migratedPolicy {
+			fmt.Printf("  [migrated] Updated policy split: %s\n", name)
+		}
+		for _, name := range migratedLearnings {
+			fmt.Printf("  [migrated] Added learnings: %s\n", name)
+		}
+		for _, name := range migratedHeartbeatScripts {
+			fmt.Printf("  [migrated] Refreshed heartbeat script: %s\n", name)
 		}
 	}
 }
@@ -68,12 +93,14 @@ func parseConductorSetupArgs(fs *flag.FlagSet, args []string) (string, []string,
 // handleConductorSetup sets up a named conductor with directories, sessions, and optionally the Telegram bridge
 func handleConductorSetup(profile string, args []string) {
 	fs := flag.NewFlagSet("conductor setup", flag.ExitOnError)
-	jsonOutput := fs.Bool("json", false, "Output as JSON")
-	noHeartbeat := fs.Bool("no-heartbeat", false, "Disable heartbeat for this conductor")
-	heartbeat := fs.Bool("heartbeat", false, "Enable heartbeat for this conductor (default)")
 	description := fs.String("description", "", "Description for this conductor")
+	heartbeat := fs.Bool("heartbeat", false, "Enable heartbeat for this conductor (default)")
+	noHeartbeat := fs.Bool("no-heartbeat", false, "Disable heartbeat for this conductor")
+	claudeMD := fs.String("claude-md", "", "Custom CLAUDE.md for this conductor (e.g., ~/docs/conductor-ryan.md)")
+	policyMD := fs.String("policy-md", "", "Custom POLICY.md for this conductor (e.g., ~/docs/my-policy.md)")
 	sharedClaudeMD := fs.String("shared-claude-md", "", "Custom path for shared CLAUDE.md (e.g., ~/docs/conductor-shared.md)")
-	claudeMD := fs.String("claude-md", "", "Custom path for this conductor's CLAUDE.md (e.g., ~/docs/conductor-ryan.md)")
+	sharedPolicyMD := fs.String("shared-policy-md", "", "Custom path for shared POLICY.md (e.g., ~/docs/conductor-policy.md)")
+	jsonOutput := fs.Bool("json", false, "Output as JSON")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: agent-deck [-p profile] conductor setup <name> [options]")
@@ -85,7 +112,28 @@ func handleConductorSetup(profile string, args []string) {
 		fmt.Println("  <name>    Conductor name (e.g., ryan, infra, monitor)")
 		fmt.Println()
 		fmt.Println("Options:")
-		fs.PrintDefaults()
+		fmt.Println("  -description string")
+		fmt.Println("        Description for this conductor")
+		fmt.Println("  -heartbeat")
+		fmt.Println("        Enable heartbeat for this conductor (default)")
+		fmt.Println("  -no-heartbeat")
+		fmt.Println("        Disable heartbeat for this conductor")
+		fmt.Println()
+		fmt.Println("Conductor-specific files:")
+		fmt.Println("  -claude-md string")
+		fmt.Println("        Custom CLAUDE.md for this conductor (e.g., ~/docs/conductor-ryan.md)")
+		fmt.Println("  -policy-md string")
+		fmt.Println("        Custom POLICY.md for this conductor (e.g., ~/docs/my-policy.md)")
+		fmt.Println()
+		fmt.Println("Shared files (all conductors):")
+		fmt.Println("  -shared-claude-md string")
+		fmt.Println("        Custom path for shared CLAUDE.md (e.g., ~/docs/conductor-shared.md)")
+		fmt.Println("  -shared-policy-md string")
+		fmt.Println("        Custom path for shared POLICY.md (e.g., ~/docs/conductor-policy.md)")
+		fmt.Println()
+		fmt.Println("Output:")
+		fmt.Println("  -json")
+		fmt.Println("        Output as JSON")
 	}
 
 	name, extras, err := parseConductorSetupArgs(fs, args)
@@ -245,12 +293,30 @@ func handleConductorSetup(profile string, args []string) {
 		fmt.Println("[ok] Shared CLAUDE.md installed/updated")
 	}
 
+	// Step 3b: Install/update shared POLICY.md
+	if err := session.InstallPolicyMD(*sharedPolicyMD); err != nil {
+		fmt.Fprintf(os.Stderr, "Error installing POLICY.md: %v\n", err)
+		os.Exit(1)
+	}
+	if !*jsonOutput {
+		fmt.Println("[ok] Shared POLICY.md installed/updated")
+	}
+
+	// Step 3c: Install shared LEARNINGS.md (don't overwrite existing)
+	if err := session.InstallLearningsMD(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error installing LEARNINGS.md: %v\n", err)
+		os.Exit(1)
+	}
+	if !*jsonOutput {
+		fmt.Println("[ok] Shared LEARNINGS.md installed")
+	}
+
 	// Step 4: Set up the named conductor
 	if !*jsonOutput {
 		fmt.Printf("\nSetting up conductor: %s (profile: %s)\n", name, resolvedProfile)
 	}
 
-	if err := session.SetupConductor(name, resolvedProfile, heartbeatEnabled, *description, *claudeMD); err != nil {
+	if err := session.SetupConductor(name, resolvedProfile, heartbeatEnabled, *description, *claudeMD, *policyMD); err != nil {
 		fmt.Fprintf(os.Stderr, "Error setting up conductor %s: %v\n", name, err)
 		os.Exit(1)
 	}
@@ -355,20 +421,36 @@ func handleConductorSetup(profile string, args []string) {
 		}
 	}
 
+	// Step 8: Install transition notifier daemon (always-on status-driven notifications)
+	var notifierDaemonPath string
+	if daemonPath, err := session.InstallTransitionNotifierDaemon(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to install transition notifier daemon: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Tip: %s\n", session.TransitionNotifierDaemonHint())
+	} else {
+		notifierDaemonPath = daemonPath
+		if !*jsonOutput {
+			fmt.Println("[ok] Transition notifier daemon installed")
+		}
+	}
+
 	// Output summary
 	if *jsonOutput {
 		data := map[string]any{
-			"success":   true,
-			"name":      name,
-			"profile":   resolvedProfile,
-			"session":   sessionID,
-			"existed":   existed,
-			"heartbeat": heartbeatEnabled,
-			"telegram":  telegramConfigured,
-			"slack":     slackConfigured,
+			"success":                 true,
+			"name":                    name,
+			"profile":                 resolvedProfile,
+			"session":                 sessionID,
+			"existed":                 existed,
+			"heartbeat":               heartbeatEnabled,
+			"telegram":                telegramConfigured,
+			"slack":                   slackConfigured,
+			"notifier_daemon_running": session.IsTransitionNotifierDaemonRunning(),
 		}
 		if plistPath != "" {
 			data["daemon"] = plistPath
+		}
+		if notifierDaemonPath != "" {
+			data["notifier_daemon"] = notifierDaemonPath
 		}
 		output, _ := json.MarshalIndent(data, "", "  ")
 		fmt.Println(string(output))
@@ -487,6 +569,15 @@ func handleConductorTeardown(_ string, args []string) {
 				fmt.Println("[ok] Daemon stopped and removed")
 			}
 		}
+		if session.IsTransitionNotifierDaemonRunning() {
+			if !*jsonOutput {
+				fmt.Println("Stopping transition notifier daemon...")
+			}
+			_ = session.UninstallTransitionNotifierDaemon()
+			if !*jsonOutput {
+				fmt.Println("[ok] Transition notifier daemon stopped and removed")
+			}
+		}
 	}
 
 	// Step 2: Stop and optionally remove each conductor
@@ -563,6 +654,8 @@ func handleConductorTeardown(_ string, args []string) {
 			_ = os.Remove(filepath.Join(condDir, "bridge.py"))
 			_ = os.Remove(filepath.Join(condDir, "bridge.log"))
 			_ = os.Remove(filepath.Join(condDir, "CLAUDE.md"))
+			_ = os.Remove(filepath.Join(condDir, "POLICY.md"))
+			_ = os.Remove(filepath.Join(condDir, "LEARNINGS.md"))
 			_ = os.Remove(condDir) // Remove dir if empty
 		}
 	}
@@ -698,12 +791,14 @@ func handleConductorStatus(_ string, args []string) {
 
 	// Check bridge daemon
 	daemonRunning := session.IsBridgeDaemonRunning()
+	notifierRunning := session.IsTransitionNotifierDaemonRunning()
 
 	if *jsonOutput {
 		output, _ := json.MarshalIndent(map[string]any{
-			"enabled":        true,
-			"conductors":     statuses,
-			"daemon_running": daemonRunning,
+			"enabled":                 true,
+			"conductors":              statuses,
+			"daemon_running":          daemonRunning,
+			"notifier_daemon_running": notifierRunning,
 		}, "", "  ")
 		fmt.Println(string(output))
 		return
@@ -718,6 +813,11 @@ func handleConductorStatus(_ string, args []string) {
 		fmt.Println("Bridge daemon: RUNNING")
 	} else {
 		fmt.Println("Bridge daemon: STOPPED")
+	}
+	if notifierRunning {
+		fmt.Println("Notifier daemon: RUNNING")
+	} else {
+		fmt.Println("Notifier daemon: STOPPED")
 	}
 	fmt.Println()
 
@@ -761,6 +861,9 @@ func handleConductorStatus(_ string, args []string) {
 	// Hints
 	if !daemonRunning {
 		fmt.Printf("Tip: %s\n", session.BridgeDaemonHint())
+	}
+	if !notifierRunning {
+		fmt.Printf("Tip: %s\n", session.TransitionNotifierDaemonHint())
 	}
 }
 

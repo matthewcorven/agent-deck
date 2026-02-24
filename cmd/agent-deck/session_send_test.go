@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,6 +106,262 @@ func TestWaitForCompletion_Timeout(t *testing.T) {
 	_, err := waitForCompletion(mock, 2*time.Second)
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
+	}
+}
+
+type mockSendRetryTarget struct {
+	sendKeysErr error
+	statuses    []string
+	statusErrs  []error
+	panes       []string
+	paneErrs    []error
+
+	statusIdx atomic.Int32
+	paneIdx   atomic.Int32
+
+	sendKeysCalls  int32
+	sendEnterCalls int32
+}
+
+func (m *mockSendRetryTarget) SendKeysAndEnter(_ string) error {
+	atomic.AddInt32(&m.sendKeysCalls, 1)
+	return m.sendKeysErr
+}
+
+func (m *mockSendRetryTarget) GetStatus() (string, error) {
+	i := int(m.statusIdx.Add(1) - 1)
+	if len(m.statuses) == 0 {
+		return "", nil
+	}
+	if i >= len(m.statuses) {
+		i = len(m.statuses) - 1
+	}
+	var err error
+	if i < len(m.statusErrs) {
+		err = m.statusErrs[i]
+	}
+	return m.statuses[i], err
+}
+
+func (m *mockSendRetryTarget) SendEnter() error {
+	atomic.AddInt32(&m.sendEnterCalls, 1)
+	return nil
+}
+
+func (m *mockSendRetryTarget) CapturePaneFresh() (string, error) {
+	i := int(m.paneIdx.Add(1) - 1)
+	if len(m.panes) == 0 {
+		return "", nil
+	}
+	if i >= len(m.panes) {
+		i = len(m.panes) - 1
+	}
+	var err error
+	if i < len(m.paneErrs) {
+		err = m.paneErrs[i]
+	}
+	return m.panes[i], err
+}
+
+func TestHasUnsentPastedPrompt(t *testing.T) {
+	if !hasUnsentPastedPrompt("❯ [Pasted text #1 +89 lines]") {
+		t.Fatal("expected pasted prompt marker to be detected")
+	}
+	if hasUnsentPastedPrompt("normal terminal output") {
+		t.Fatal("did not expect normal output to be detected as pasted prompt")
+	}
+}
+
+func TestHasUnsentComposerPrompt(t *testing.T) {
+	content := "────────────────\n❯\u00a0Write one line: LAUNCH_OK\n[Opus 4.6] Context: 0%"
+	if !hasUnsentComposerPrompt(content, "Write one line: LAUNCH_OK") {
+		t.Fatal("expected unsent composer prompt to be detected")
+	}
+	if hasUnsentComposerPrompt(content, "Different text") {
+		t.Fatal("did not expect mismatched composer text to be detected")
+	}
+
+	// Submitted messages can appear in history; only current composer should count.
+	submitted := "❯ Write one line: LAUNCH_OK\n✳ Tempering…\n────────────────\n❯\n────────────────\n[Opus 4.6] Context: 0%"
+	if hasUnsentComposerPrompt(submitted, "Write one line: LAUNCH_OK") {
+		t.Fatal("did not expect submitted history line to be treated as unsent composer input")
+	}
+
+	// Wrapped current composer lines only expose a prefix of the message.
+	wrappedContent := "────────────────\n❯\u00a0Read these 3 files and produce a summary for DIAGTOKEN_123. Keep\n  under 80 lines and include one verdict line.\n────────────────\n[Opus 4.6] Context: 0%"
+	wrappedMessage := "Read these 3 files and produce a summary for DIAGTOKEN_123. Keep under 80 lines and include one verdict line."
+	if !hasUnsentComposerPrompt(wrappedContent, wrappedMessage) {
+		t.Fatal("expected wrapped unsent composer prompt to be detected")
+	}
+
+	// Claude hint suggestions should not be treated as unsent input for a
+	// different message.
+	suggestion := "────────────────\n❯\u00a0Try \"write a test for <filepath>\"\n────────────────\n[Opus 4.6] Context: 0%"
+	if hasUnsentComposerPrompt(suggestion, wrappedMessage) {
+		t.Fatal("did not expect suggestion placeholder to be treated as unsent composer input")
+	}
+}
+
+func TestCurrentComposerPrompt_UsesBottomComposerBlock(t *testing.T) {
+	content := strings.Join([]string{
+		"> quoted output line from earlier response",
+		"Some other output",
+		"────────────────",
+		"❯\u00a0Read these 3 files and produce a summary for DIAGTOKEN_123. Keep",
+		"  under 80 lines and include one verdict line.",
+		"────────────────",
+		"[Opus 4.6] Context: 0%",
+	}, "\n")
+
+	got, ok := currentComposerPrompt(content)
+	if !ok {
+		t.Fatal("expected current composer prompt to be found")
+	}
+	want := "Read these 3 files and produce a summary for DIAGTOKEN_123. Keep under 80 lines and include one verdict line."
+	if got != want {
+		t.Fatalf("unexpected composer prompt.\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+func TestSendWithRetryTarget_SkipVerify(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		statuses: []string{"waiting"},
+		panes:    []string{""},
+	}
+	err := sendWithRetryTarget(mock, "hello", true, sendRetryOptions{maxRetries: 4, checkDelay: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if atomic.LoadInt32(&mock.sendEnterCalls) != 0 {
+		t.Fatalf("expected 0 SendEnter calls, got %d", mock.sendEnterCalls)
+	}
+}
+
+func TestSendWithRetryTarget_StopsWhenActive(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		statuses: []string{"active"},
+		panes:    []string{""},
+	}
+	err := sendWithRetryTarget(mock, "hello", false, sendRetryOptions{maxRetries: 4, checkDelay: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if atomic.LoadInt32(&mock.sendEnterCalls) != 0 {
+		t.Fatalf("expected 0 SendEnter calls, got %d", mock.sendEnterCalls)
+	}
+}
+
+func TestSendWithRetryTarget_WaitingWithoutPasteMarkerReturnsSuccess(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		statuses: []string{"waiting", "waiting", "waiting", "waiting"},
+		panes:    []string{"", "", "", ""},
+	}
+	err := sendWithRetryTarget(mock, "hello", false, sendRetryOptions{maxRetries: 4, checkDelay: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&mock.sendEnterCalls); got != 1 {
+		t.Fatalf("expected 1 periodic fallback SendEnter call for waiting-without-active state, got %d", got)
+	}
+}
+
+func TestSendWithRetryTarget_RetriesOnUnsentPasteMarker(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		statuses: []string{"waiting", "waiting", "waiting", "waiting", "waiting"},
+		panes: []string{
+			"[Pasted text #1 +89 lines]",
+			"[Pasted text #1 +89 lines]",
+			"[Pasted text #1 +89 lines]",
+			"[Pasted text #1 +89 lines]",
+			"[Pasted text #1 +89 lines]",
+		},
+	}
+	err := sendWithRetryTarget(mock, "hello", false, sendRetryOptions{maxRetries: 5, checkDelay: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&mock.sendEnterCalls); got != 5 {
+		t.Fatalf("expected 5 SendEnter calls when unsent marker persists, got %d", got)
+	}
+}
+
+func TestSendWithRetryTarget_DetectsPasteMarkerAfterInitialWaiting(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		statuses: []string{"waiting", "waiting", "active"},
+		panes: []string{
+			"",
+			"[Pasted text #1 +18 lines]",
+			"",
+		},
+	}
+	err := sendWithRetryTarget(mock, "hello", false, sendRetryOptions{maxRetries: 5, checkDelay: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&mock.sendEnterCalls); got != 1 {
+		t.Fatalf("expected 1 SendEnter call when pasted marker appears after initial waiting, got %d", got)
+	}
+}
+
+func TestSendWithRetryTarget_RetriesWhenComposerPromptStillHasMessage(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		statuses: []string{"waiting", "active"},
+		panes: []string{
+			"❯ Write one line: LAUNCH_OK",
+			"",
+		},
+	}
+	err := sendWithRetryTarget(mock, "Write one line: LAUNCH_OK", false, sendRetryOptions{maxRetries: 4, checkDelay: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&mock.sendEnterCalls); got != 1 {
+		t.Fatalf("expected 1 SendEnter call when composer still has unsent message, got %d", got)
+	}
+}
+
+func TestSendWithRetryTarget_RetriesWhenWrappedComposerPromptStillHasMessage(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		statuses: []string{"waiting", "active"},
+		panes: []string{
+			"────────────────\n❯ Read these 3 files and produce a summary for DIAGTOKEN_123. Keep\n  under 80 lines.\n────────────────",
+			"",
+		},
+	}
+	message := "Read these 3 files and produce a summary for DIAGTOKEN_123. Keep under 80 lines."
+	err := sendWithRetryTarget(mock, message, false, sendRetryOptions{maxRetries: 4, checkDelay: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&mock.sendEnterCalls); got != 1 {
+		t.Fatalf("expected 1 SendEnter call when wrapped composer prompt still has unsent message, got %d", got)
+	}
+}
+
+func TestSendWithRetryTarget_AmbiguousStateUsesLimitedFallbackRetries(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		statuses: []string{"error", "error", "error", "error"},
+		panes:    []string{"", "", "", ""},
+	}
+	err := sendWithRetryTarget(mock, "hello", false, sendRetryOptions{maxRetries: 4, checkDelay: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := atomic.LoadInt32(&mock.sendEnterCalls); got != 2 {
+		t.Fatalf("expected 2 limited fallback SendEnter calls, got %d", got)
+	}
+}
+
+func TestSendWithRetryTarget_ReturnsErrorWhenInitialSendFails(t *testing.T) {
+	mock := &mockSendRetryTarget{
+		sendKeysErr: fmt.Errorf("tmux send failed"),
+	}
+	err := sendWithRetryTarget(mock, "hello", false, sendRetryOptions{maxRetries: 3, checkDelay: 0})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to send message") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }
 

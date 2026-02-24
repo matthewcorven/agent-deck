@@ -55,6 +55,11 @@ const (
 	// At 2s: 2-5 CapturePane() calls/sec = minimal CPU overhead
 	tickInterval = 2 * time.Second
 
+	// Launch animation minimum durations.
+	// Claude/Gemini get longer feedback because startup UI is richer and may settle asynchronously.
+	minLaunchAnimationDurationDefault = 500 * time.Millisecond
+	minLaunchAnimationDurationClaude  = 800 * time.Millisecond
+
 	// logCheckInterval - how often to check for oversized logs (fast check, just file stats)
 	// This catches runaway logs before they cause high CPU
 	logCheckInterval = 10 * time.Second
@@ -1359,6 +1364,13 @@ func (h *Home) cleanupExpiredAnimations(animMap map[string]time.Time, claudeTime
 	return toDelete
 }
 
+func launchAnimationMinDuration(tool string) time.Duration {
+	if tool == "claude" || tool == "gemini" {
+		return minLaunchAnimationDurationClaude
+	}
+	return minLaunchAnimationDurationDefault
+}
+
 // hasActiveAnimation checks if a session has an animation currently being displayed
 // Returns true only if the animation is actually showing (not just tracked in the map)
 // This MUST match the display logic in renderPreviewPane exactly
@@ -1397,8 +1409,8 @@ func (h *Home) hasActiveAnimation(sessionID string) bool {
 	// Status is updated via background polling (2s interval)
 	timeSinceStart := time.Since(startTime)
 
-	// Brief minimum (500ms) to prevent flicker during rapid status changes
-	if timeSinceStart < 500*time.Millisecond {
+	// Brief minimum to prevent flicker during rapid status changes
+	if timeSinceStart < launchAnimationMinDuration(inst.GetToolThreadSafe()) {
 		return true
 	}
 
@@ -2601,6 +2613,8 @@ func (h *Home) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case sessionRestartedMsg:
 		if msg.err != nil {
+			// Restart failed - clear resuming animation immediately so user can retry.
+			delete(h.resumingSessions, msg.sessionID)
 			h.setError(fmt.Errorf("failed to restart session: %w", msg.err))
 		} else {
 			// Find the instance and refresh its MCP state (O(1) lookup)
@@ -3678,11 +3692,6 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if h.cursor < len(h.flatItems) {
 			item := h.flatItems[h.cursor]
 			if item.Type == session.ItemTypeSession && item.Session != nil {
-				// Block attachment during animations (must match renderPreviewPane display logic)
-				if h.hasActiveAnimation(item.Session.ID) {
-					h.setError(fmt.Errorf("session is starting, please wait..."))
-					return h, nil
-				}
 				if item.Session.Exists() {
 					h.isAttaching.Store(true) // Prevent View() output during transition (atomic)
 					return h, h.attachSession(item.Session)
@@ -3792,11 +3801,15 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return h, nil
 
 	case "m":
-		// Move session to different group
+		// MCP Manager - for Claude and Gemini sessions
 		if h.cursor < len(h.flatItems) {
 			item := h.flatItems[h.cursor]
-			if item.Type == session.ItemTypeSession {
-				h.groupDialog.ShowMove(h.groupTree.GetGroupNames())
+			if item.Type == session.ItemTypeSession && item.Session != nil &&
+				(item.Session.Tool == "claude" || item.Session.Tool == "gemini") {
+				h.mcpDialog.SetSize(h.width, h.height)
+				if err := h.mcpDialog.Show(item.Session.ProjectPath, item.Session.ID, item.Session.Tool); err != nil {
+					h.setError(err)
+				}
 			}
 		}
 		return h, nil
@@ -3837,21 +3850,7 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return h, nil
 
-	case "M", "shift+m":
-		// MCP Manager - for Claude and Gemini sessions
-		if h.cursor < len(h.flatItems) {
-			item := h.flatItems[h.cursor]
-			if item.Type == session.ItemTypeSession && item.Session != nil &&
-				(item.Session.Tool == "claude" || item.Session.Tool == "gemini") {
-				h.mcpDialog.SetSize(h.width, h.height)
-				if err := h.mcpDialog.Show(item.Session.ProjectPath, item.Session.ID, item.Session.Tool); err != nil {
-					h.setError(err)
-				}
-			}
-		}
-		return h, nil
-
-	case "P", "shift+p":
+	case "s":
 		// Skills Manager - currently for Claude sessions
 		if h.cursor < len(h.flatItems) {
 			item := h.flatItems[h.cursor]
@@ -3861,6 +3860,16 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if err := h.skillDialog.Show(item.Session.ProjectPath, item.Session.ID, item.Session.Tool); err != nil {
 					h.setError(err)
 				}
+			}
+		}
+		return h, nil
+
+	case "M", "shift+m":
+		// Move session to different group
+		if h.cursor < len(h.flatItems) {
+			item := h.flatItems[h.cursor]
+			if item.Type == session.ItemTypeSession {
+				h.groupDialog.ShowMove(h.groupTree.GetGroupNames())
 			}
 		}
 		return h, nil
@@ -4906,21 +4915,6 @@ func (h *Home) loadUIState() {
 	h.pendingCursorRestore = &state
 }
 
-// getUsedClaudeSessionIDs returns a map of all Claude session IDs currently in use
-// This is used for deduplication when detecting new session IDs
-func (h *Home) getUsedClaudeSessionIDs() map[string]bool {
-	h.instancesMu.RLock()
-	defer h.instancesMu.RUnlock()
-
-	usedIDs := make(map[string]bool)
-	for _, inst := range h.instances {
-		if inst.ClaudeSessionID != "" {
-			usedIDs[inst.ClaudeSessionID] = true
-		}
-	}
-	return usedIDs
-}
-
 // createSessionInGroupWithWorktreeAndOptions creates a new session with full options including YOLO mode and tool options
 func (h *Home) createSessionInGroupWithWorktreeAndOptions(name, path, command, groupPath, worktreePath, worktreeRepoRoot, worktreeBranch string, geminiYoloMode bool, toolOptionsJSON json.RawMessage) tea.Cmd {
 	return func() tea.Msg {
@@ -5141,9 +5135,6 @@ func (h *Home) forkSessionCmdWithOptions(source *session.Instance, title, groupP
 	// Track source session as "forking" for immediate UI feedback
 	h.forkingSessions[source.ID] = time.Now()
 
-	// Capture current used session IDs before starting the async fork
-	// This ensures we don't detect an already-used session ID
-	usedIDs := h.getUsedClaudeSessionIDs()
 	sourceID := source.ID // Capture for closure
 
 	return func() tea.Msg {
@@ -5170,8 +5161,6 @@ func (h *Home) forkSessionCmdWithOptions(source *session.Instance, title, groupP
 		}
 
 		switch inst.Tool {
-		case "claude":
-			_ = inst.WaitForClaudeSessionWithExclude(5*time.Second, usedIDs)
 		case "opencode":
 			go inst.DetectOpenCodeSession()
 		}
@@ -5226,7 +5215,19 @@ func (h *Home) restartSession(inst *session.Instance) tea.Cmd {
 	mcpUILog.Debug("restart_session_called", slog.String("id", inst.ID), slog.String("title", inst.Title), slog.String("tool", inst.Tool))
 	return func() tea.Msg {
 		mcpUILog.Debug("restart_session_executing", slog.String("id", id))
-		err := inst.Restart()
+
+		// Resolve current instance by ID at execution time. During storage reloads,
+		// the pointer captured from the key event can be replaced before this cmd runs.
+		h.instancesMu.RLock()
+		current := h.instanceByID[id]
+		h.instancesMu.RUnlock()
+		if current == nil {
+			err := fmt.Errorf("session no longer exists")
+			mcpUILog.Debug("restart_session_result", slog.String("id", id), slog.Any("error", err))
+			return sessionRestartedMsg{sessionID: id, err: err}
+		}
+
+		err := current.Restart()
 		mcpUILog.Debug("restart_session_result", slog.String("id", id), slog.Any("error", err))
 		return sessionRestartedMsg{sessionID: id, err: err}
 	}
@@ -6520,7 +6521,10 @@ func (h *Home) renderHelpBarMinimal() string {
 				contextKeys += " " + keyStyle.Render("f")
 			}
 			if item.Session != nil && (item.Session.Tool == "claude" || item.Session.Tool == "gemini") {
-				contextKeys += " " + keyStyle.Render("M")
+				contextKeys += " " + keyStyle.Render("m")
+			}
+			if item.Session != nil && item.Session.Tool == "claude" {
+				contextKeys += " " + keyStyle.Render("s")
 			}
 		}
 	}
@@ -6578,11 +6582,11 @@ func (h *Home) renderHelpBarCompact() string {
 				contextHints = append(contextHints, h.helpKeyShort("f", "Fork"))
 			}
 			if item.Session != nil && (item.Session.Tool == "claude" || item.Session.Tool == "gemini") {
-				contextHints = append(contextHints, h.helpKeyShort("M", "MCP"))
+				contextHints = append(contextHints, h.helpKeyShort("m", "MCP"))
 				contextHints = append(contextHints, h.helpKeyShort("v", h.previewModeShort()))
 			}
 			if item.Session != nil && item.Session.Tool == "claude" {
-				contextHints = append(contextHints, h.helpKeyShort("P", "Skills"))
+				contextHints = append(contextHints, h.helpKeyShort("s", "Skills"))
 			}
 			contextHints = append(contextHints, h.helpKeyShort("c", "Copy"))
 			contextHints = append(contextHints, h.helpKeyShort("x", "Send"))
@@ -6683,17 +6687,17 @@ func (h *Home) renderHelpBarFull() string {
 			}
 			// Show MCP Manager and preview mode toggle for Claude and Gemini sessions
 			if item.Session != nil && (item.Session.Tool == "claude" || item.Session.Tool == "gemini") {
-				primaryHints = append(primaryHints, h.helpKey("M", "MCP"))
+				primaryHints = append(primaryHints, h.helpKey("m", "MCP"))
 				primaryHints = append(primaryHints, h.helpKey("v", h.previewModeShort()))
 			}
 			if item.Session != nil && item.Session.Tool == "claude" {
-				primaryHints = append(primaryHints, h.helpKey("P", "Skills"))
+				primaryHints = append(primaryHints, h.helpKey("s", "Skills"))
 			}
 			primaryHints = append(primaryHints, h.helpKey("c", "Copy"))
 			primaryHints = append(primaryHints, h.helpKey("x", "Send"))
 			secondaryHints = []string{
 				h.helpKey("r", "Rename"),
-				h.helpKey("m", "Move"),
+				h.helpKey("M", "Move"),
 				h.helpKey("d", "Delete"),
 			}
 		}
@@ -7999,8 +8003,8 @@ func (h *Home) renderPreviewPane(width, height int) string {
 	if isLaunching || isResuming || isMcpLoading {
 		timeSinceStart := time.Since(animationStartTime)
 
-		// Brief minimum (500ms) to prevent flicker
-		if timeSinceStart < 500*time.Millisecond {
+		// Brief minimum to prevent flicker
+		if timeSinceStart < launchAnimationMinDuration(selected.Tool) {
 			if isMcpLoading {
 				showMcpLoadingAnimation = true
 			} else {

@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/BurntSushi/toml"
@@ -36,6 +35,12 @@ type UserConfig struct {
 	// MCPDefaultScope sets the default scope for MCP operations
 	// Valid values: "local" (default), "global", "user"
 	MCPDefaultScope string `toml:"mcp_default_scope"`
+
+	// ManageMCPJson controls whether agent-deck writes to .mcp.json in project directories.
+	// Set to false to prevent agent-deck from touching any .mcp.json files, which is useful
+	// when you manage that file manually or via another tool.
+	// Default: true (nil = true)
+	ManageMCPJson *bool `toml:"manage_mcp_json"`
 
 	// MCPs defines available MCP servers for the MCP Manager
 	// These can be attached/detached per-project via the MCP Manager (M key)
@@ -303,7 +308,7 @@ func (i *InstanceSettings) GetAllowMultiple() bool {
 // ShellSettings defines shell environment configuration for sessions
 type ShellSettings struct {
 	// EnvFiles is a list of .env files to source for ALL sessions
-	// Paths can be absolute, ~ for home, or relative to session working directory
+	// Paths can be absolute, ~ for home, $HOME/${VAR} for env vars, or relative to session working directory
 	// Files are sourced in order; later files override earlier ones
 	EnvFiles []string `toml:"env_files"`
 
@@ -421,7 +426,7 @@ type ClaudeSettings struct {
 
 	// EnvFile is a .env file specific to Claude sessions
 	// Sourced AFTER global [shell].env_files
-	// Path can be absolute, ~ for home, or relative to session working directory
+	// Path can be absolute, ~ for home, $HOME/${VAR} for env vars, or relative to session working directory
 	EnvFile string `toml:"env_file"`
 
 	// HooksEnabled enables Claude Code hooks for real-time status detection.
@@ -440,7 +445,7 @@ func (c *UserConfig) GetProfileClaudeConfigDir(profile string) string {
 	if !ok || profileCfg.Claude.ConfigDir == "" {
 		return ""
 	}
-	return expandTilde(profileCfg.Claude.ConfigDir)
+	return ExpandPath(profileCfg.Claude.ConfigDir)
 }
 
 // GetDangerousMode returns whether dangerous mode is enabled, defaulting to true
@@ -472,6 +477,7 @@ type GeminiSettings struct {
 
 	// EnvFile is a .env file specific to Gemini sessions
 	// Sourced AFTER global [shell].env_files
+	// Path can be absolute, ~ for home, $HOME/${VAR} for env vars, or relative to session working directory
 	EnvFile string `toml:"env_file"`
 }
 
@@ -488,6 +494,7 @@ type OpenCodeSettings struct {
 
 	// EnvFile is a .env file specific to OpenCode sessions
 	// Sourced AFTER global [shell].env_files
+	// Path can be absolute, ~ for home, $HOME/${VAR} for env vars, or relative to session working directory
 	EnvFile string `toml:"env_file"`
 }
 
@@ -589,6 +596,7 @@ type ToolDef struct {
 
 	// EnvFile is a .env file specific to this tool
 	// Sourced AFTER global [shell].env_files
+	// Path can be absolute, ~ for home, $HOME/${VAR} for env vars, or relative to session working directory
 	EnvFile string `toml:"env_file"`
 
 	// Env is inline environment variables for this tool
@@ -1170,11 +1178,7 @@ func GetExperimentsSettings() ExperimentsSettings {
 		homeDir, _ := os.UserHomeDir()
 		settings.Directory = filepath.Join(homeDir, "src", "tries")
 	} else {
-		// Expand ~ in path
-		if strings.HasPrefix(settings.Directory, "~/") {
-			homeDir, _ := os.UserHomeDir()
-			settings.Directory = filepath.Join(homeDir, settings.Directory[2:])
-		}
+		settings.Directory = ExpandPath(settings.Directory)
 	}
 
 	// DatePrefix defaults to true (Go zero value is false, need explicit check)
@@ -1405,6 +1409,11 @@ auto_cleanup = true
 # "user" writes to ~/.claude.json (all profiles)
 # mcp_default_scope = "local"
 
+# Disable ALL .mcp.json management (default: true)
+# Set to false if you manage .mcp.json manually or via another tool and don't
+# want agent-deck to touch it. LOCAL-scope MCP changes will be silently skipped.
+# manage_mcp_json = false
+
 # Tmux session settings
 # Controls how agent-deck configures tmux sessions
 # [tmux]
@@ -1594,6 +1603,19 @@ func GetMCPDefaultScope() string {
 	default:
 		return "local"
 	}
+}
+
+// GetManageMCPJson returns whether agent-deck should write to .mcp.json files.
+// Defaults to true when unset.
+func GetManageMCPJson() bool {
+	config, err := LoadUserConfig()
+	if err != nil || config == nil {
+		return true
+	}
+	if config.ManageMCPJson == nil {
+		return true
+	}
+	return *config.ManageMCPJson
 }
 
 // GetMCPDef returns a specific MCP definition by name

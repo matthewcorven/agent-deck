@@ -266,6 +266,46 @@ func TestHomeRenameSessionComplete(t *testing.T) {
 	}
 }
 
+func TestHomeEnterDuringLaunchingDoesNotShowStartingError(t *testing.T) {
+	home := NewHome()
+	home.width = 100
+	home.height = 30
+
+	inst := session.NewInstance("launching-session", "/tmp/project")
+	home.instancesMu.Lock()
+	home.instances = []*session.Instance{inst}
+	home.instanceByID[inst.ID] = inst
+	home.instancesMu.Unlock()
+
+	home.flatItems = []session.Item{
+		{Type: session.ItemTypeSession, Session: inst},
+	}
+	home.cursor = 0
+	home.launchingSessions[inst.ID] = time.Now()
+
+	model, _ := home.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	h, ok := model.(*Home)
+	if !ok {
+		t.Fatal("Update should return *Home")
+	}
+
+	if h.err != nil && strings.Contains(h.err.Error(), "session is starting, please wait") {
+		t.Fatalf("unexpected launch block error: %v", h.err)
+	}
+}
+
+func TestLaunchAnimationMinDurationByTool(t *testing.T) {
+	if got := launchAnimationMinDuration("claude"); got != minLaunchAnimationDurationClaude {
+		t.Fatalf("claude min duration = %v, want %v", got, minLaunchAnimationDurationClaude)
+	}
+	if got := launchAnimationMinDuration("gemini"); got != minLaunchAnimationDurationClaude {
+		t.Fatalf("gemini min duration = %v, want %v", got, minLaunchAnimationDurationClaude)
+	}
+	if got := launchAnimationMinDuration("shell"); got != minLaunchAnimationDurationDefault {
+		t.Fatalf("default min duration = %v, want %v", got, minLaunchAnimationDurationDefault)
+	}
+}
+
 func TestHomeRenamePendingChangesSurviveReload(t *testing.T) {
 	home := NewHome()
 	home.width = 100
@@ -847,5 +887,56 @@ func TestHomeViewAllLayoutModes(t *testing.T) {
 				t.Errorf("Terminal %dx%d should render, got 'too small'", tc.width, tc.height)
 			}
 		})
+	}
+}
+
+func TestSessionRestartedMsgErrorClearsResumingAnimation(t *testing.T) {
+	home := NewHome()
+	inst := session.NewInstance("restart-test", "/tmp/project")
+
+	home.instancesMu.Lock()
+	home.instances = []*session.Instance{inst}
+	home.instanceByID[inst.ID] = inst
+	home.instancesMu.Unlock()
+
+	home.resumingSessions[inst.ID] = time.Now()
+
+	model, _ := home.Update(sessionRestartedMsg{
+		sessionID: inst.ID,
+		err:       fmt.Errorf("restart failed"),
+	})
+	h := model.(*Home)
+
+	if _, ok := h.resumingSessions[inst.ID]; ok {
+		t.Fatal("resuming animation should be cleared after restart error")
+	}
+	if h.err == nil {
+		t.Fatal("expected restart error to be set")
+	}
+	if !strings.Contains(h.err.Error(), "failed to restart session") {
+		t.Fatalf("unexpected error: %v", h.err)
+	}
+}
+
+func TestRestartSessionCmdSessionMissingReturnsError(t *testing.T) {
+	home := NewHome()
+	inst := session.NewInstance("restart-test", "/tmp/project")
+
+	// Build command with a valid instance, then simulate reload/delete before cmd runs.
+	cmd := home.restartSession(inst)
+	home.instancesMu.Lock()
+	delete(home.instanceByID, inst.ID)
+	home.instancesMu.Unlock()
+
+	msg := cmd()
+	restarted, ok := msg.(sessionRestartedMsg)
+	if !ok {
+		t.Fatalf("expected sessionRestartedMsg, got %T", msg)
+	}
+	if restarted.err == nil {
+		t.Fatal("expected error when session no longer exists")
+	}
+	if !strings.Contains(restarted.err.Error(), "session no longer exists") {
+		t.Fatalf("unexpected error: %v", restarted.err)
 	}
 }

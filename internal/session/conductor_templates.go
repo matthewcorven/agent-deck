@@ -1,21 +1,13 @@
 package session
 
 // conductorSharedClaudeMDTemplate is the shared CLAUDE.md written to ~/.agent-deck/conductor/CLAUDE.md.
-// It contains CLI reference, protocols, and rules shared by all conductors.
+// It contains CLI reference, protocols, and formats shared by all conductors (mechanism).
+// Agent behavior (rules, auto-response policy) lives in POLICY.md, not here.
 // Claude Code walks up the directory tree, so per-conductor CLAUDE.md files inherit this automatically.
 const conductorSharedClaudeMDTemplate = `# Conductor: Shared Knowledge Base
 
-This file contains shared knowledge for all conductor sessions. Each conductor has its own identity file in its subdirectory.
-
-## Core Rules
-
-1. **Keep responses SHORT.** The user reads them on their phone. 1-3 sentences max for status updates. Use bullet points for lists.
-2. **Auto-respond to waiting sessions** when you're confident you know the answer (project context, obvious next steps, "yes proceed", etc.)
-3. **Escalate to the user** when you're unsure. Just say what needs attention and why.
-4. **Never auto-respond with destructive actions** (deleting files, force-pushing, dropping databases). Always escalate those.
-5. **Never send messages to running sessions.** Only respond to sessions in "waiting" status.
-6. **Log everything.** Every action you take goes in ` + "`" + `./task-log.md` + "`" + `.
-7. **This project is ` + "`" + `asheshgoplani/agent-deck` + "`" + ` on GitHub.** When referencing GitHub issues or PRs, always use owner ` + "`" + `asheshgoplani` + "`" + ` and repo ` + "`" + `agent-deck` + "`" + `. Never use ` + "`" + `anthropics` + "`" + ` as the owner.
+This file contains shared infrastructure knowledge (CLI reference, protocols, formats) for all conductor sessions.
+Each conductor has its own identity in its subdirectory and its own policy in POLICY.md.
 
 ## Agent-Deck CLI Reference
 
@@ -35,6 +27,7 @@ This file contains shared knowledge for all conductor sessions. Each conductor h
 | Command | Description |
 |---------|-------------|
 | ` + "`" + `agent-deck -p <PROFILE> session send <id_or_title> "message"` + "`" + ` | Send a message. Has built-in 60s wait for agent readiness. |
+| ` + "`" + `agent-deck -p <PROFILE> session send <id_or_title> "message" --wait -q --timeout 300s` + "`" + ` | Single-call send + wait + raw output (preferred when you need the reply now). |
 | ` + "`" + `agent-deck -p <PROFILE> session send <id_or_title> "message" --no-wait` + "`" + ` | Send immediately without waiting for ready state. |
 
 ### Session Control
@@ -44,6 +37,7 @@ This file contains shared knowledge for all conductor sessions. Each conductor h
 | ` + "`" + `agent-deck -p <PROFILE> session stop <id_or_title>` + "`" + ` | Stop a running session |
 | ` + "`" + `agent-deck -p <PROFILE> session restart <id_or_title>` + "`" + ` | Restart (reloads MCPs for Claude) |
 | ` + "`" + `agent-deck -p <PROFILE> add <path> -t "Title" -c claude -g "group"` + "`" + ` | Create new Claude session |
+| ` + "`" + `agent-deck -p <PROFILE> launch <path> -t "Title" -c claude -g "group" -m "prompt"` + "`" + ` | Create + start + send initial prompt in one command (preferred for new task sessions) |
 | ` + "`" + `agent-deck -p <PROFILE> add <path> -t "Title" -c claude --worktree feature/branch -b` + "`" + ` | Create session with new worktree |
 
 ### Session Resolution
@@ -82,28 +76,6 @@ NEED: api-fix - asking whether to run integration tests against staging or prod
 ` + "```" + `
 
 The bridge parses your response: if it contains ` + "`" + `NEED:` + "`" + ` lines, those get sent to the user via Telegram and/or Slack.
-
-## Auto-Response Guidelines
-
-### Safe to Auto-Respond
-- "Should I proceed?" / "Should I continue?" -> Yes, if the plan looks reasonable
-- "Which file should I edit?" -> Answer if the project structure makes it obvious
-- "Tests passed. What's next?" -> Direct to the next logical step
-- "I've completed X. Anything else?" -> If nothing else is needed, tell it
-- Compilation/lint errors with obvious fixes -> Suggest the fix
-- Questions about project conventions -> Answer from context
-
-### Always Escalate
-- "Should I delete X?" / "Should I force-push?"
-- "I found a security issue..."
-- "Multiple approaches possible, which do you prefer?"
-- "I need API keys / credentials / tokens"
-- "Should I deploy to production?"
-- "I'm stuck and don't know how to proceed"
-- Any question about business logic or design decisions
-
-### When Unsure
-If you're not sure whether to auto-respond, **escalate**. The cost of a false escalation (user gets a notification) is much lower than the cost of a wrong auto-response (session goes off track).
 
 ## State Management
 
@@ -144,6 +116,34 @@ Append every action to ` + "`" + `./task-log.md` + "`" + `:
 - Responded with summary
 ` + "```" + `
 
+## Self-Improvement
+
+Maintain ` + "`" + `LEARNINGS.md` + "`" + ` to track orchestration patterns. Two tiers exist:
+- ` + "`" + `../LEARNINGS.md` + "`" + ` (shared): patterns that work across all conductors
+- ` + "`" + `./LEARNINGS.md` + "`" + ` (per-conductor): patterns specific to your profile and sessions
+
+### When to Log
+
+| Situation | Entry Type |
+|-----------|-----------|
+| You auto-responded and user later said it was wrong | ` + "`" + `auto_response_wrong` + "`" + ` |
+| You auto-responded and it worked well | ` + "`" + `auto_response_ok` + "`" + ` |
+| You escalated but user said it was fine to auto-respond | ` + "`" + `escalation_unnecessary` + "`" + ` |
+| You escalated and user confirmed it needed attention | ` + "`" + `escalation_correct` + "`" + ` |
+| You notice a recurring session behavior | ` + "`" + `session_behavior` + "`" + ` |
+| You discover a useful pattern | ` + "`" + `pattern` + "`" + ` |
+
+### Promotion to Policy
+
+When an entry reaches Recurrence 3+ and has proven reliable, promote it:
+1. Distill into a concise rule
+2. Add to ` + "`" + `./POLICY.md` + "`" + ` (create if needed) or request update to ` + "`" + `../POLICY.md` + "`" + ` (shared)
+3. Set entry Status to ` + "`" + `promoted` + "`" + `
+
+### At Startup
+
+Read both ` + "`" + `./LEARNINGS.md` + "`" + ` and ` + "`" + `../LEARNINGS.md` + "`" + ` before responding. Past patterns inform current decisions.
+
 ## Quick Commands
 
 The bridge may forward these special commands from Telegram or Slack:
@@ -160,17 +160,157 @@ For any other text, treat it as a conversational message from the user. They mig
 
 ## Important Notes
 
+- This project is ` + "`" + `asheshgoplani/agent-deck` + "`" + ` on GitHub. When referencing GitHub issues or PRs, always use owner ` + "`" + `asheshgoplani` + "`" + ` and repo ` + "`" + `agent-deck` + "`" + `. Never use ` + "`" + `anthropics` + "`" + ` as the owner.
 - You cannot directly access other sessions' files. Use ` + "`" + `session output` + "`" + ` to read their latest response.
-- ` + "`" + `session send` + "`" + ` waits up to 60 seconds for the agent to be ready. If the session is running (busy), the send will wait.
-- The bridge polls your status every 2 seconds after sending you a message. Reply promptly.
+- Prefer ` + "`" + `launch ... -m "prompt"` + "`" + ` over separate ` + "`" + `add` + "`" + ` + ` + "`" + `session start` + "`" + ` + ` + "`" + `session send` + "`" + ` when creating a new task session.
+- Keep parent linkage for event routing; if you need a specific group, pass ` + "`" + `-g <group>` + "`" + ` explicitly (it overrides inherited parent group).
+- ` + "`" + `session send` + "`" + ` waits up to ~80 seconds for the agent to be ready. If the session is running (busy), the send will wait.
+- For periodic nudges/heartbeats where blocking is harmful, prefer ` + "`" + `session send --no-wait -q` + "`" + `.
+- The bridge sends with ` + "`" + `session send --wait -q` + "`" + ` and waits in a single CLI call. Reply promptly.
 - Your own session can be restarted by the bridge if it detects you're in an error state.
 - Keep state.json small (no large output dumps). Store summaries, not full text.
+`
+
+// conductorLearningsTemplate is the default LEARNINGS.md written to ~/.agent-deck/conductor/LEARNINGS.md
+// and ~/.agent-deck/conductor/<name>/LEARNINGS.md.
+// It provides a structured format for conductors to log orchestration patterns learned from experience.
+// Two tiers: shared (generic patterns across all conductors) and per-conductor (project/person-specific).
+const conductorLearningsTemplate = `# Conductor Learnings
+
+Orchestration patterns learned from experience. Review at startup and before heartbeat responses.
+
+## How to Use This File
+
+- **Log** a new entry when: you auto-respond and later learn it was wrong, you escalate and user says it was unnecessary, you discover a pattern in session behavior, or a recurring situation emerges.
+- **Promote** entries to POLICY.md when they recur 3+ times and prove reliable.
+- **Delete** entries that turn out to be wrong or no longer relevant.
+
+## Entry Format
+
+### [YYYYMMDD-NNN] Short description
+- **Type**: auto_response_ok | auto_response_wrong | escalation_unnecessary | escalation_correct | pattern | session_behavior
+- **Sessions**: which session(s) this involved
+- **Context**: what happened
+- **Lesson**: what to do differently (or keep doing)
+- **Recurrence**: N (increment when seen again)
+- **Status**: active | promoted | retired
+
+---
+`
+
+// conductorPolicyTemplate is the default POLICY.md written to ~/.agent-deck/conductor/POLICY.md.
+// It contains agent behavior rules (auto-response policy, escalation guidelines, response style).
+// Per-conductor overrides can be placed at ~/.agent-deck/conductor/<name>/POLICY.md.
+const conductorPolicyTemplate = `# Conductor Policy
+
+Operating rules that govern how the conductor behaves.
+This file can be overridden per conductor by placing a POLICY.md in the conductor's directory.
+
+## Core Rules
+
+1. **Keep responses SHORT.** The user reads them on their phone. 1-3 sentences max for status updates. Use bullet points for lists.
+2. **Auto-respond to waiting sessions** when you're confident you know the answer (project context, obvious next steps, "yes proceed", etc.)
+3. **Escalate to the user** when you're unsure. Just say what needs attention and why.
+4. **Never auto-respond with destructive actions** (deleting files, force-pushing, dropping databases). Always escalate those.
+5. **Never send messages to running sessions.** Only respond to sessions in "waiting" status.
+6. **Log everything.** Every action you take goes in ` + "`" + `./task-log.md` + "`" + `.
+
+## Auto-Response Guidelines
+
+### Safe to Auto-Respond
+- "Should I proceed?" / "Should I continue?" -> Yes, if the plan looks reasonable
+- "Which file should I edit?" -> Answer if the project structure makes it obvious
+- "Tests passed. What's next?" -> Direct to the next logical step
+- "I've completed X. Anything else?" -> If nothing else is needed, tell it
+- Compilation/lint errors with obvious fixes -> Suggest the fix
+- Questions about project conventions -> Answer from context
+
+### Always Escalate
+- "Should I delete X?" / "Should I force-push?"
+- "I found a security issue..."
+- "Multiple approaches possible, which do you prefer?"
+- "I need API keys / credentials / tokens"
+- "Should I deploy to production?"
+- "I'm stuck and don't know how to proceed"
+- Any question about business logic or design decisions
+
+### When Unsure
+If you're not sure whether to auto-respond, **escalate**. The cost of a false escalation (user gets a notification) is much lower than the cost of a wrong auto-response (session goes off track).
 `
 
 // conductorPerNameClaudeMDTemplate is the per-conductor CLAUDE.md written to ~/.agent-deck/conductor/<name>/CLAUDE.md.
 // It contains only the conductor's identity. Shared knowledge is inherited from the parent directory's CLAUDE.md.
 // {NAME} and {PROFILE} placeholders are replaced at setup time.
 const conductorPerNameClaudeMDTemplate = `# Conductor: {NAME} ({PROFILE} profile)
+
+You are **{NAME}**, a conductor for the **{PROFILE}** profile.
+
+## Your Identity
+
+- Your session title is ` + "`" + `conductor-{NAME}` + "`" + `
+- You manage the **{PROFILE}** profile exclusively. Always pass ` + "`" + `-p {PROFILE}` + "`" + ` to all CLI commands.
+- You live in ` + "`" + `~/.agent-deck/conductor/{NAME}/` + "`" + `
+- Maintain state in ` + "`" + `./state.json` + "`" + ` and log actions in ` + "`" + `./task-log.md` + "`" + `
+- The bridge (Telegram/Slack) sends you messages from the user and forwards your responses back
+- You receive periodic ` + "`" + `[HEARTBEAT]` + "`" + ` messages with system status
+- Other conductors may exist for different purposes. You only manage sessions in your profile.
+
+## Startup Checklist
+
+When you first start (or after a restart):
+
+1. Read ` + "`" + `./state.json` + "`" + ` if it exists (restore context)
+2. Read ` + "`" + `./LEARNINGS.md` + "`" + ` and ` + "`" + `../LEARNINGS.md` + "`" + ` if they exist (review past patterns)
+3. Run ` + "`" + `agent-deck -p {PROFILE} status --json` + "`" + ` to get the current state
+4. Run ` + "`" + `agent-deck -p {PROFILE} list --json` + "`" + ` to know what sessions exist
+5. Log startup in ` + "`" + `./task-log.md` + "`" + `
+6. If any sessions are in error state, try to restart them
+7. Reply: "Conductor {NAME} ({PROFILE}) online. N sessions tracked (X running, Y waiting)."
+
+## Policy
+
+Your operating rules (auto-response policy, escalation guidelines, response style) are in ` + "`" + `./POLICY.md` + "`" + `.
+If ` + "`" + `./POLICY.md` + "`" + ` does not exist, use ` + "`" + `../POLICY.md` + "`" + ` instead.
+Read the policy file at the start of each interaction.
+`
+
+// conductorPerNameClaudeMDPreLearningsTemplate is the post-policy-split but pre-learnings per-conductor CLAUDE.md template.
+// It is kept only for migration matching and should not be used for new writes.
+const conductorPerNameClaudeMDPreLearningsTemplate = `# Conductor: {NAME} ({PROFILE} profile)
+
+You are **{NAME}**, a conductor for the **{PROFILE}** profile.
+
+## Your Identity
+
+- Your session title is ` + "`" + `conductor-{NAME}` + "`" + `
+- You manage the **{PROFILE}** profile exclusively. Always pass ` + "`" + `-p {PROFILE}` + "`" + ` to all CLI commands.
+- You live in ` + "`" + `~/.agent-deck/conductor/{NAME}/` + "`" + `
+- Maintain state in ` + "`" + `./state.json` + "`" + ` and log actions in ` + "`" + `./task-log.md` + "`" + `
+- The bridge (Telegram/Slack) sends you messages from the user and forwards your responses back
+- You receive periodic ` + "`" + `[HEARTBEAT]` + "`" + ` messages with system status
+- Other conductors may exist for different purposes. You only manage sessions in your profile.
+
+## Startup Checklist
+
+When you first start (or after a restart):
+
+1. Read ` + "`" + `./state.json` + "`" + ` if it exists (restore context)
+2. Run ` + "`" + `agent-deck -p {PROFILE} status --json` + "`" + ` to get the current state
+3. Run ` + "`" + `agent-deck -p {PROFILE} list --json` + "`" + ` to know what sessions exist
+4. Log startup in ` + "`" + `./task-log.md` + "`" + `
+5. If any sessions are in error state, try to restart them
+6. Reply: "Conductor {NAME} ({PROFILE}) online. N sessions tracked (X running, Y waiting)."
+
+## Policy
+
+Your operating rules (auto-response policy, escalation guidelines, response style) are in ` + "`" + `./POLICY.md` + "`" + `.
+If ` + "`" + `./POLICY.md` + "`" + ` does not exist, use ` + "`" + `../POLICY.md` + "`" + ` instead.
+Read the policy file at the start of each interaction.
+`
+
+// conductorPerNameClaudeMDLegacyTemplate is the pre-policy-split per-conductor CLAUDE.md template.
+// It is kept only for migration matching and should not be used for new writes.
+const conductorPerNameClaudeMDLegacyTemplate = `# Conductor: {NAME} ({PROFILE} profile)
 
 You are **{NAME}**, a conductor for the **{PROFILE}** profile.
 
@@ -264,9 +404,6 @@ SLACK_MAX_LENGTH = 40000
 
 # How long to wait for conductor to respond (seconds)
 RESPONSE_TIMEOUT = 300
-
-# Poll interval when waiting for conductor response (seconds)
-POLL_INTERVAL = 2
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -471,18 +608,36 @@ def get_session_output(session: str, profile: str | None = None) -> str:
 
 
 def send_to_conductor(
-    session: str, message: str, profile: str | None = None
-) -> bool:
-    """Send a message to the conductor session. Returns True on success."""
-    result = run_cli(
-        "session", "send", session, message, profile=profile, timeout=120
-    )
+    session: str,
+    message: str,
+    profile: str | None = None,
+    wait_for_reply: bool = False,
+    response_timeout: int = RESPONSE_TIMEOUT,
+) -> tuple[bool, str]:
+    """Send a message to the conductor session.
+
+    Returns (success, response_text). When wait_for_reply=False, response_text is "".
+    """
+    if wait_for_reply:
+        # Single-call flow: send + wait + print raw response.
+        # Avoids extra status/output polling round-trips.
+        result = run_cli(
+            "session", "send", session, message,
+            "--wait", "--timeout", f"{response_timeout}s", "-q",
+            profile=profile,
+            timeout=max(response_timeout+30, 60),
+        )
+    else:
+        result = run_cli(
+            "session", "send", session, message, "--no-wait",
+            profile=profile, timeout=30,
+        )
     if result.returncode != 0:
         log.error(
             "Failed to send to conductor: %s", result.stderr.strip()
         )
-        return False
-    return True
+        return False, ""
+    return True, result.stdout.strip()
 
 
 def get_status_summary(profile: str | None = None) -> dict:
@@ -600,57 +755,6 @@ def parse_conductor_prefix(text: str, conductor_names: list[str]) -> tuple[str |
             return name, text[len(prefix):].strip()
 
     return None, text
-
-
-# ---------------------------------------------------------------------------
-# Response polling
-# ---------------------------------------------------------------------------
-
-
-async def wait_for_response(
-    session: str, profile: str | None = None, timeout: int = RESPONSE_TIMEOUT
-) -> str:
-    """Poll until the conductor finishes processing (status = waiting/idle).
-
-    Two phases:
-    1. Wait for the session to become active (processing the message).
-       This avoids reading stale output from before the message was sent.
-    2. Wait for the session to return to waiting/idle (response ready).
-
-    If reading the output fails (e.g. session file not yet created for new
-    sessions), keeps polling instead of returning the error immediately.
-    """
-    elapsed = 0
-    saw_active = False
-    last_error = ""
-
-    while elapsed < timeout:
-        await asyncio.sleep(POLL_INTERVAL)
-        elapsed += POLL_INTERVAL
-
-        status = get_session_status(session, profile=profile)
-        if status == "error":
-            return "[Conductor session is in error state. Try /restart]"
-
-        if status in ("running", "active", "starting"):
-            saw_active = True
-            continue
-
-        if status in ("waiting", "idle"):
-            should_read = saw_active or elapsed >= 6
-            if should_read:
-                output = get_session_output(session, profile=profile)
-                if output.startswith("[Error"):
-                    # Output not available yet (e.g. JSONL file not created).
-                    # Keep polling — it should appear soon.
-                    last_error = output
-                    saw_active = True  # prevent re-reading every poll
-                    continue
-                return output
-
-    if last_error:
-        return last_error
-    return f"[Conductor timed out after {timeout}s. It may still be processing.]"
 
 
 # ---------------------------------------------------------------------------
@@ -884,22 +988,24 @@ def create_telegram_bot(config: dict):
         log.info(
             "User message -> [%s]: %s", target["name"], cleaned_msg[:100]
         )
-        if not send_to_conductor(
-            session_title, cleaned_msg, profile=profile
-        ):
+        ok, response = send_to_conductor(
+            session_title,
+            cleaned_msg,
+            profile=profile,
+            wait_for_reply=True,
+            response_timeout=RESPONSE_TIMEOUT,
+        )
+        if not ok:
             await message.answer(
                 f"[Failed to send message to conductor {target['name']}.]"
             )
             return
 
-        # Wait for response
+        # Response is returned directly by session send --wait.
         name_tag = (
             f"[{target['name']}] " if len(conductors) > 1 else ""
         )
         await message.answer(f"{name_tag}...")  # typing indicator
-        response = await wait_for_response(
-            session_title, profile=profile
-        )
         log.info("Conductor [%s] response: %s", target["name"], response[:100])
 
         # Send response back (split if needed)
@@ -1027,7 +1133,14 @@ def create_slack_app(config: dict):
             return
 
         log.info("Slack message -> [%s]: %s", target["name"], cleaned_msg[:100])
-        if not send_to_conductor(session_title, cleaned_msg, profile=profile):
+        ok, response = send_to_conductor(
+            session_title,
+            cleaned_msg,
+            profile=profile,
+            wait_for_reply=True,
+            response_timeout=RESPONSE_TIMEOUT,
+        )
+        if not ok:
             await _safe_say(
                 say,
                 text=f"[Failed to send message to conductor {target['name']}.]",
@@ -1038,7 +1151,7 @@ def create_slack_app(config: dict):
         name_tag = f"[{target['name']}] " if len(conductors) > 1 else ""
         await _safe_say(say, text=f"{name_tag}...", thread_ts=thread_ts)
 
-        response = await wait_for_response(session_title, profile=profile)
+        # Response is returned directly by session send --wait.
         log.info("Conductor [%s] response: %s", target["name"], response[:100])
 
         for chunk in split_message(response, max_len=SLACK_MAX_LENGTH):
@@ -1314,19 +1427,21 @@ async def heartbeat_loop(config: dict, telegram_bot=None, slack_app=None, slack_
                     continue
 
                 # Send heartbeat to conductor
-                if not send_to_conductor(
-                    session_title, heartbeat_msg, profile=profile
-                ):
+                ok, response = send_to_conductor(
+                    session_title,
+                    heartbeat_msg,
+                    profile=profile,
+                    wait_for_reply=True,
+                    response_timeout=RESPONSE_TIMEOUT,
+                )
+                if not ok:
                     log.error(
                         "Heartbeat [%s]: failed to send to conductor",
                         name,
                     )
                     continue
 
-                # Wait for conductor's response
-                response = await wait_for_response(
-                    session_title, profile=profile
-                )
+                # Response is returned directly by session send --wait.
                 log.info(
                     "Heartbeat [%s] response: %s",
                     name, response[:200],

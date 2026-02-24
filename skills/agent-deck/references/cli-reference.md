@@ -9,6 +9,7 @@ Complete reference for all agent-deck CLI commands.
 - [Web Command](#web-command)
 - [Session Commands](#session-commands)
 - [MCP Commands](#mcp-commands)
+- [Skill Commands](#skill-commands)
 - [Group Commands](#group-commands)
 - [Profile Commands](#profile-commands)
 - [Conductor Commands](#conductor-commands)
@@ -33,14 +34,38 @@ agent-deck add [path] [options]
 |------|-------------|
 | `-t, --title` | Session title |
 | `-g, --group` | Group path |
-| `-c, --cmd` | Command (claude, gemini, opencode, codex, custom) |
+| `-c, --cmd` | Tool/command (claude, gemini, opencode, codex, custom) |
+| `--wrapper` | Wrapper command; use `{command}` placeholder |
 | `--parent` | Parent session (creates child) |
+| `--no-parent` | Disable automatic parent linking |
 | `--mcp` | Attach MCP (repeatable) |
 
 ```bash
 agent-deck add -t "My Project" -c claude .
 agent-deck add -t "Child" --parent "Parent" -c claude /tmp/x
+agent-deck add -g ard --parent "conductor-ard" -c claude .
+agent-deck add -c "codex --dangerously-bypass-approvals-and-sandbox" .
 agent-deck add -t "Research" -c claude --mcp exa --mcp firecrawl /tmp/r
+```
+
+Notes:
+- Parent auto-link is enabled by default when `AGENT_DECK_SESSION_ID` is present and neither `--parent` nor `--no-parent` is passed.
+- `--parent` and `--no-parent` are mutually exclusive.
+- Explicit `-g/--group` overrides inherited parent group.
+- If `--cmd` contains extra args and no explicit `--wrapper` is provided, agent-deck auto-generates a wrapper to preserve those args.
+
+### launch - Create + start (+ optional message)
+
+```bash
+agent-deck launch [path] [options]
+```
+
+Examples:
+
+```bash
+agent-deck launch . -c claude -m "Review this module"
+agent-deck launch . -g ard -c claude -m "Review dataset"
+agent-deck launch . -c "codex --dangerously-bypass-approvals-and-sandbox"
 ```
 
 ### list - List sessions
@@ -195,7 +220,11 @@ agent-deck session set <id|title> <field> <value>
 agent-deck session send <id|title> "message" [--no-wait] [-q] [--json]
 ```
 
-Default: Waits for agent readiness before sending.
+Default behavior:
+- Waits for agent readiness before sending.
+- Verifies processing starts after send.
+- If Claude leaves a pasted prompt unsent (`[Pasted text ...]`), retries `Enter` automatically.
+- Avoids unnecessary retry `Enter` presses when session is already `waiting`/`idle`.
 
 ### session output
 
@@ -241,6 +270,67 @@ agent-deck mcp attach <session> <mcp> [--global] [--restart]
 
 ```bash
 agent-deck mcp detach <session> <mcp> [--global] [--restart]
+```
+
+## Skill Commands
+
+Skills are discovered from configured sources and attached per project (Claude only).
+
+### skill list
+
+```bash
+agent-deck skill list [--source <name>] [--json] [-q]
+agent-deck skill ls
+```
+
+`--source` filters by source name (for example `pool`, `claude-global`, `team`).
+
+### skill attached
+
+```bash
+agent-deck skill attached [id|title] [--json] [-q]
+```
+
+Shows:
+- Manifest-managed attachments from `<project>/.agent-deck/skills.toml`
+- Unmanaged entries currently present in `<project>/.claude/skills`
+
+### skill attach
+
+```bash
+agent-deck skill attach <session> <skill> [--source <name>] [--restart] [--json] [-q]
+```
+
+- `--source`: Force source when name is ambiguous
+- `--restart`: Restart session immediately after attach
+
+### skill detach
+
+```bash
+agent-deck skill detach <session> <skill> [--source <name>] [--restart] [--json] [-q]
+```
+
+- `--source`: Filter by source when detaching
+- `--restart`: Restart session immediately after detach
+
+### skill source list
+
+```bash
+agent-deck skill source list [--json] [-q]
+agent-deck skill source ls
+```
+
+### skill source add
+
+```bash
+agent-deck skill source add <name> <path> [--description "..."] [--json] [-q]
+```
+
+### skill source remove
+
+```bash
+agent-deck skill source remove <name> [--json] [-q]
+agent-deck skill source rm <name>
 ```
 
 ## Group Commands
@@ -295,7 +385,9 @@ agent-deck conductor list [--profile <name>]
 - `setup` creates `~/.agent-deck/conductor/<name>/` plus `meta.json` and registers `conductor-<name>` session in the selected profile.
 - `setup` also installs shared `~/.agent-deck/conductor/CLAUDE.md` (or symlink via `--shared-claude-md`).
 - Heartbeat timers run per conductor (default every 15 minutes) and can be disabled with `--no-heartbeat`.
+- Heartbeat sends use non-blocking `session send --no-wait -q` to avoid timeout churn when sessions are busy.
 - Bridge daemon is installed only when Telegram and/or Slack is configured in `[conductor]`.
+- Transition notifier daemon (`agent-deck notify-daemon`) is installed by setup and sends event nudges on `running -> waiting|error|idle` transitions (parent first, then conductor fallback).
 
 ## Session Resolution
 

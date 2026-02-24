@@ -1899,6 +1899,30 @@ func TestInstance_GetJSONLPath(t *testing.T) {
 	})
 }
 
+func TestInstance_GetLastResponseBestEffort_ClaudeNoSessionID(t *testing.T) {
+	inst := NewInstance("best-effort", t.TempDir())
+	inst.Tool = "claude"
+	inst.ClaudeSessionID = ""
+	inst.tmuxSession = nil // Avoid tmux dependencies for this fallback-path test
+
+	resp, err := inst.GetLastResponseBestEffort()
+	if err != nil {
+		t.Fatalf("GetLastResponseBestEffort() unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("GetLastResponseBestEffort() returned nil response")
+	}
+	if resp.Tool != "claude" {
+		t.Fatalf("Tool = %q, want %q", resp.Tool, "claude")
+	}
+	if resp.Role != "assistant" {
+		t.Fatalf("Role = %q, want %q", resp.Role, "assistant")
+	}
+	if resp.Content != "" {
+		t.Fatalf("Content = %q, want empty string", resp.Content)
+	}
+}
+
 func TestSessionHasConversationData(t *testing.T) {
 	// Create temp directory structure
 	tmpDir := t.TempDir()
@@ -2184,6 +2208,77 @@ func TestInstance_HookFastPath_CodexWaitingFreshness(t *testing.T) {
 	}
 }
 
+func TestInstance_UpdateCodexSession_ScanCooldown(t *testing.T) {
+	origCodexHome := os.Getenv("CODEX_HOME")
+	codexHome := t.TempDir()
+	if err := os.Setenv("CODEX_HOME", codexHome); err != nil {
+		t.Fatalf("set CODEX_HOME: %v", err)
+	}
+	defer func() {
+		if origCodexHome != "" {
+			_ = os.Setenv("CODEX_HOME", origCodexHome)
+		} else {
+			_ = os.Unsetenv("CODEX_HOME")
+		}
+	}()
+
+	projectPath := filepath.Join(codexHome, "project")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatalf("create project dir: %v", err)
+	}
+
+	inst := NewInstanceWithTool("codex-cooldown", projectPath, "codex")
+
+	sessionID1 := "11111111-1111-4111-8111-111111111111"
+	sessionID2 := "22222222-2222-4222-8222-222222222222"
+
+	file1 := writeCodexSessionFile(t, codexHome, sessionID1, projectPath)
+	file1Time := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(file1, file1Time, file1Time); err != nil {
+		t.Fatalf("set file1 mtime: %v", err)
+	}
+
+	inst.UpdateCodexSession(nil)
+	if inst.CodexSessionID != sessionID1 {
+		t.Fatalf("first scan picked %q, want %q", inst.CodexSessionID, sessionID1)
+	}
+
+	file2 := writeCodexSessionFile(t, codexHome, sessionID2, projectPath)
+	file2Time := time.Now().Add(-1 * time.Minute)
+	if err := os.Chtimes(file2, file2Time, file2Time); err != nil {
+		t.Fatalf("set file2 mtime: %v", err)
+	}
+
+	// Immediate follow-up should skip expensive scan and keep existing ID.
+	inst.UpdateCodexSession(nil)
+	if inst.CodexSessionID != sessionID1 {
+		t.Fatalf("cooldown should keep %q, got %q", sessionID1, inst.CodexSessionID)
+	}
+
+	// After cooldown, scan should run and pick the newer rotated session.
+	inst.lastCodexScanAt = time.Now().Add(-codexRotationScanInterval - time.Second)
+	inst.UpdateCodexSession(nil)
+	if inst.CodexSessionID != sessionID2 {
+		t.Fatalf("post-cooldown scan picked %q, want %q", inst.CodexSessionID, sessionID2)
+	}
+}
+
+func writeCodexSessionFile(t *testing.T, codexHome, sessionID, cwd string) string {
+	t.Helper()
+
+	sessionsDir := filepath.Join(codexHome, "sessions", "2026", "02", "18")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("create sessions dir: %v", err)
+	}
+
+	filePath := filepath.Join(sessionsDir, sessionID+".jsonl")
+	content := fmt.Sprintf("{\"cwd\":%q}\n", cwd)
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+	return filePath
+}
+
 // TestInstance_UpdateHookStatus tests the UpdateHookStatus method.
 func TestInstance_UpdateHookStatus(t *testing.T) {
 	inst := NewInstanceWithTool("hook-update-test", "/tmp/test", "claude")
@@ -2237,5 +2332,56 @@ func TestInstance_SetAcknowledgedFromShared_WaitingApplied(t *testing.T) {
 
 	if !inst.tmuxSession.IsAcknowledged() {
 		t.Fatal("waiting session should apply shared acknowledged=true")
+	}
+}
+
+func TestHasUnsentComposerPrompt(t *testing.T) {
+	content := "────────────────\n❯\u00a0Write one line: LAUNCH_OK\n[Opus 4.6] Context: 0%"
+	if !hasUnsentComposerPrompt(content, "Write one line: LAUNCH_OK") {
+		t.Fatal("expected unsent composer prompt to be detected")
+	}
+	if hasUnsentComposerPrompt(content, "Different text") {
+		t.Fatal("did not expect mismatched composer text to be detected")
+	}
+
+	// Submitted messages can appear in history; only current composer should count.
+	submitted := "❯ Write one line: LAUNCH_OK\n✳ Tempering…\n────────────────\n❯\n────────────────\n[Opus 4.6] Context: 0%"
+	if hasUnsentComposerPrompt(submitted, "Write one line: LAUNCH_OK") {
+		t.Fatal("did not expect submitted history line to be treated as unsent composer input")
+	}
+
+	// Wrapped current composer lines only expose a prefix of the message.
+	wrappedContent := "────────────────\n❯\u00a0Read these 3 files and produce a summary for DIAGTOKEN_123. Keep\n  under 80 lines and include one verdict line.\n────────────────\n[Opus 4.6] Context: 0%"
+	wrappedMessage := "Read these 3 files and produce a summary for DIAGTOKEN_123. Keep under 80 lines and include one verdict line."
+	if !hasUnsentComposerPrompt(wrappedContent, wrappedMessage) {
+		t.Fatal("expected wrapped unsent composer prompt to be detected")
+	}
+
+	// Claude hint suggestions should not be treated as unsent input for a
+	// different message.
+	suggestion := "────────────────\n❯\u00a0Try \"write a test for <filepath>\"\n────────────────\n[Opus 4.6] Context: 0%"
+	if hasUnsentComposerPrompt(suggestion, wrappedMessage) {
+		t.Fatal("did not expect suggestion placeholder to be treated as unsent composer input")
+	}
+}
+
+func TestCurrentComposerPrompt_UsesBottomComposerBlock(t *testing.T) {
+	content := strings.Join([]string{
+		"> quoted output line from earlier response",
+		"Some other output",
+		"────────────────",
+		"❯\u00a0Read these 3 files and produce a summary for DIAGTOKEN_123. Keep",
+		"  under 80 lines and include one verdict line.",
+		"────────────────",
+		"[Opus 4.6] Context: 0%",
+	}, "\n")
+
+	got, ok := currentComposerPrompt(content)
+	if !ok {
+		t.Fatal("expected current composer prompt to be found")
+	}
+	want := "Read these 3 files and produce a summary for DIAGTOKEN_123. Keep under 80 lines and include one verdict line."
+	if got != want {
+		t.Fatalf("unexpected composer prompt.\nwant: %q\ngot:  %q", want, got)
 	}
 }
