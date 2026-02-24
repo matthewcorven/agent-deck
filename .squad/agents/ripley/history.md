@@ -36,3 +36,12 @@ Agent Deck is a Go CLI/TUI tool for managing multiple AI coding agent sessions v
 - New tool integrations must respect: `userconfig.go` (settings struct), `tooloptions.go` (options struct), `instance.go` (lifecycle), `tmux/patterns.go` (detection)
 
 **Alignment with Copilot CLI plan:** The phased plan is well-aligned with existing patterns. No gaps found — it mirrors the Codex/OpenCode integration approach exactly. The parent design doc's acceptance criteria, non-goals, and viability assessment are thorough.
+
+### 2026-02-24 — Phase 0 Execution Plan
+
+Recommended the Phase 0 execution approach for Copilot CLI integration:
+- **Matthew** performs manual captures (launch, session flow, exit, errors, `--help`, `--version`, `~/.copilot/`, MCP output, pane title)
+- **Parker** drafts detection patterns from captured data
+- **Ripley** gates session ID extraction strategy before Phase 1 proceeds
+- Top risks: session ID detection (may not be exposed by Copilot CLI) and TUI rendering in tmux
+- Advisory only — no decisions recorded, no code changes
