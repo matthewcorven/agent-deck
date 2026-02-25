@@ -68,3 +68,12 @@ Recommended the Phase 0 execution approach for Copilot CLI integration:
 **Merge recommendation:** `git merge upstream/main` immediately. 4-5 file conflicts expected, all additive/resolvable. No rebase — preserves our commit history.
 
 **Phase docs needing update:** Phase 0 (minor), Phase 1 (high — ExpandPath, resolveSessionCommand), Phase 2 (high — command resolution pipeline), Phase 3 (medium — session recovery chain), Phase 4 (medium — idle status, CapturePaneFresh, transition daemon).
+
+### 2026-02-24 — CLI vs ACP Analysis Review
+
+**Reviewed Parker's comparative analysis** (`docs/plans/copilot-cli/copilot-cli-vs-sdk-analysis.md`). Approved CLI-first recommendation (v1), ACP deferred to Phase 7+. Key architectural insights:
+
+- **`StatusProvider` interface:** Requested this be added in Phase 1 to abstract status detection from tmux. Small change (~30 lines) that prevents a cross-cutting refactor when ACP arrives. Without it, UI/conductor/notify/web all couple directly to tmux pattern matching.
+- **ACP effort is understated:** The 89h estimate doesn't account for the bidirectional nature of ACP — the client must *serve* methods (fs/terminal providers), not just call them. Realistic estimate: 100–110h.
+- **Session ID detection is the critical gating risk:** ACP gives session IDs for free; CLI requires scraping/discovery. This remains the #1 unknown for Phase 0 and should block Phase 1 until resolved.
+- **Upstream mitigants:** `CapturePaneFresh()` and `GetLastResponseBestEffort()` from v0.19.14 partially offset CLI pattern fragility — these should be cited in Phase 4 planning.

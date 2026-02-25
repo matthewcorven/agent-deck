@@ -32,6 +32,8 @@ Reviewed 59 files, +5873/−807 lines. Key changes: `expandHomePath()` → `Expa
 
 ### 2026-02-24: Copilot CLI vs SDK/ACP — CLI for v1, ACP Deferred
 
-**Author:** Parker (Integration Dev) · **Reviewed by:** Ripley (Lead) · **Status:** Proposed
+**Author:** Parker (Integration Dev) · **Reviewed by:** Ripley (Lead) · **Status:** Approved
 
 Use CLI (tmux-based) for v1. Defer ACP to Phase 7+ as alternative session mode. CLI maps 1:1 to existing architecture (~37h effort). ACP requires Go JSON-RPC bidi client, fs/terminal providers, permission UI (~89h effort, 2.4× slower). ACP is Preview-status, protocol v1, SDK v0.14.1 (TypeScript-only). Dual-process hybrid doesn't work — separate session contexts. Full analysis: `docs/plans/copilot-cli/copilot-cli-vs-sdk-analysis.md`.
+
+**Lead review (Ripley):** Approved. Additional requirement: introduce a `StatusProvider` interface in `internal/session/` during Phase 1 (~30 lines) to abstract status detection from tmux-specific implementation — prevents coupling and makes future ACP transition a drop-in replacement. Gating condition: session ID detection remains a hard blocker for Phase 0; must be resolved from live capture data before Phase 1 proceeds.
