@@ -87,3 +87,12 @@ type StatusProvider interface {
 **Status:** Decided
 **What:** Copilot CLI session IDs will be detected via filesystem scanning of `~/.copilot/session-state/*/workspace.yaml`, matching by `cwd`/`git_root` and creation time. This mirrors the Codex `queryCodexSession()` pattern. A dual-ID model (workspace UUID from `workspace.yaml` + session UUID from `events.jsonl` directory) will be tracked in the Instance struct. Fallback is `--continue` for resume when filesystem detection fails.
 **Why:** The `/session` TUI modal is a blocking overlay that cannot be scraped from tmux. The welcome banner contains no session ID. The filesystem approach is the only reliable non-interactive extraction method, and it aligns exactly with the project's established Codex pattern — YAML parsing, project path matching, time-window filtering. This resolves the Phase 0 hard gate and unblocks Phase 3.
+
+---
+
+### 2026-02-25: Parker charter — cross-platform parity responsibility
+
+**By:** Ripley (Lead)
+**Status:** Decided
+**What:** Added "Ensure equal support for all major platforms (Linux, macOS, Windows WSL2) and ensure consistent behavior across them" to Parker's charter responsibilities. All Copilot CLI integration work must account for platform differences.
+**Why:** User directive. Agent Deck supports Linux, macOS, and Windows WSL2 — Copilot integration must maintain that parity from the start rather than retrofitting later.

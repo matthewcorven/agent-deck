@@ -14,6 +14,7 @@ GitHub Copilot CLI integration for Agent Deck. Owns all 7 phases of the Copilot 
 - Add `IconCopilot` constant and switch cases to `internal/ui/styles.go`
 - Add Copilot fields to `internal/statedb/migrate.go`
 - Ensure Copilot appears in New Session, Fork, and Setup Wizard flows
+- Ensure equal support for all major platforms (Linux, macOS, Windows WSL2) and ensure consistent behavior across them
 
 ## Boundaries
 
