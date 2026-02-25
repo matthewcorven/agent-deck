@@ -8,6 +8,12 @@
 
 Every other tool (Claude, Gemini, OpenCode, Codex) was integrated by first observing what the CLI actually renders in a tmux pane. This phase eliminates the single unknown: what text patterns to match against.
 
+> **⚠️ HARD BLOCKER — Session ID Detection**
+>
+> Session ID extraction is the **#1 open risk** for Copilot CLI integration. If Phase 0 cannot determine a reliable method to detect or extract session IDs from the Copilot CLI, **Phase 3 (Session Detection + Resume) is blocked entirely.** Phases 1 and 2 may proceed (config surface and command builder don't require session IDs), but any functionality depending on session identity — resume, restart, session history — cannot be built until this is resolved.
+>
+> Task 3 below is the **gating deliverable** for this question. Treat it with the highest priority during live capture.
+
 ## Tasks
 
 ### 1. Install & authenticate
@@ -65,7 +71,9 @@ States to capture:
 | **MCP server output** | Look for lines like "Connected to GitHub MCP server" or custom MCP config announcements. The Copilot CLI ships with a built-in GitHub MCP server — if it announces in the TUI, this affects status detection patterns and MCP pooling integration in later phases. |
 | **Pane title** | Run `tmux display-message -p '#{pane_title}'` while Copilot is active. Some CLIs set the terminal/pane title dynamically — if Copilot does this, it could serve as an alternative detection signal alongside content scraping (potentially more reliable for state detection). |
 
-### 3. Determine session ID detection strategy
+### 3. Determine session ID detection strategy (**GATING DELIVERABLE**)
+
+> This task is a **hard gate**. Its outcome determines whether Phase 3 (Session Detection + Resume) can proceed. If no reliable session ID extraction method is found, document that finding explicitly and record the fallback strategy.
 
 Answer these questions from the live session:
 
@@ -74,6 +82,12 @@ Answer these questions from the live session:
 - Does `--continue` reliably resume the last session without an explicit ID?
 - Is the session ID visible in `/usage` output?
 - What is the session ID format? (UUID, hash, incremental?)
+
+**Fallback strategy if no session ID is discoverable:**
+
+1. **Synthetic IDs** — Generate an Agent Deck–managed session ID (UUID) at launch time. Store the mapping in SQLite. Resume/restart would rely on Agent Deck's own tracking rather than the CLI's native session concept.
+2. **`--continue` only** — If the CLI supports `--continue` (resume last session) but exposes no explicit session ID, Agent Deck can use that flag without needing to know the ID. Multi-session resume would not be possible.
+3. **Defer Phase 3** — If neither option is viable, Phase 3 is deferred until ACP (Phase 7+) provides programmatic session access. Document this as a known limitation.
 
 ### 4. Draft preliminary patterns
 
@@ -105,7 +119,7 @@ Create `docs/plans/copilot-cli-captures/` with:
 
 - [ ] CLI metadata captured and committed (`cli-help.txt`, `cli-version.txt`, `copilot-dir-structure.txt`)
 - [ ] Captured terminal content files committed to `docs/plans/copilot-cli-captures/` (plain text + ANSI pairs)
-- [ ] Session ID detection strategy documented in `findings.md`
+- [ ] **HARD GATE:** Session ID detection strategy documented in `findings.md` — must explicitly state whether a reliable extraction method exists. If not, the chosen fallback strategy must be recorded. Phase 3 is blocked until this is resolved.
 - [ ] Preliminary `DefaultRawPatterns("copilot")` drafted (even if approximate)
 - [ ] Any new CLI flags or behaviors not in the design doc are noted
 

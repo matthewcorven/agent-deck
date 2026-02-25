@@ -77,3 +77,11 @@ Recommended the Phase 0 execution approach for Copilot CLI integration:
 - **ACP effort is understated:** The 89h estimate doesn't account for the bidirectional nature of ACP — the client must *serve* methods (fs/terminal providers), not just call them. Realistic estimate: 100–110h.
 - **Session ID detection is the critical gating risk:** ACP gives session IDs for free; CLI requires scraping/discovery. This remains the #1 unknown for Phase 0 and should block Phase 1 until resolved.
 - **Upstream mitigants:** `CapturePaneFresh()` and `GetLastResponseBestEffort()` from v0.19.14 partially offset CLI pattern fragility — these should be cited in Phase 4 planning.
+
+### 2026-02-24 — Phase 0 & Phase 1 Doc Updates (CLI vs SDK Review Items)
+
+Incorporated two findings from the CLI vs ACP review into the phase docs:
+
+1. **Phase 0 — Session ID Hard Blocker:** Added a prominent warning callout after the intro marking session ID detection as the #1 open risk and a hard blocker for Phase 3. Upgraded Task 3 to a "GATING DELIVERABLE" with explicit fallback strategies (synthetic IDs, `--continue`-only, defer Phase 3). Strengthened the exit criteria to mark the session ID item as a hard gate.
+
+2. **Phase 1 — StatusProvider Interface:** Added a new file section (`internal/session/status_provider.go`) defining the `StatusProvider` interface and `ToolStatus` enum type. Interface has `Status()`, `LastActivity()`, and `SessionID()` methods. Added rationale explaining this prevents coupling to tmux pattern matching and makes ACP a drop-in implementation. Added 4 new exit criteria items.

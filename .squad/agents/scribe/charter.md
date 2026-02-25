@@ -6,7 +6,7 @@ Silent session logger and memory manager. Maintains decisions.md, orchestration 
 
 ## Responsibilities
 
-- Merge `.squad/decisions/inbox/` entries into `decisions.md`
+- Merge `.squad/decisions/inbox/` entries into `decisions.md` (validate against `.squad/templates/decision-format.md`)
 - Write orchestration log entries to `.squad/orchestration-log/`
 - Write session logs to `.squad/log/`
 - Cross-pollinate relevant updates to agents' history.md files

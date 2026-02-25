@@ -43,4 +43,13 @@ If you make a decision that affects other team members, write it to:
 ```
 .squad/decisions/inbox/copilot-{brief-slug}.md
 ```
+Use the format defined in `.squad/templates/decision-format.md`:
+```
+### {ISO-date}: {Title}
+
+**By:** @copilot (Coding Agent)
+**Status:** {Decided|Completed|Observation}
+**What:** {1-3 sentences}
+**Why:** {1-3 sentences}
+```
 The Scribe will merge it into the shared decisions file.

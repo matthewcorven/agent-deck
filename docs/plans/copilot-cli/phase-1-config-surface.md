@@ -156,6 +156,57 @@ env_file = ""               # Session-specific .env file
 | `env_file` | string | none | `.env` file sourced for Copilot sessions. |
 ```
 
+### 6. `internal/session/status_provider.go` (NEW)
+
+**Define the `StatusProvider` interface** to abstract tool status detection from the underlying transport (tmux content scraping today, ACP event subscription in Phase 7+).
+
+This is a small addition (~30 lines) that prevents a cross-cutting refactor later. Without it, the UI, conductor, notify daemon, and web relay all couple directly to tmux pattern matching. When ACP arrives, the ACP client becomes a drop-in `StatusProvider` implementation with no changes needed in consumers.
+
+```go
+package session
+
+import "time"
+
+// ToolStatus represents the current state of a tool session.
+type ToolStatus int
+
+const (
+	ToolStatusUnknown   ToolStatus = iota
+	ToolStatusBusy                         // tool is executing / thinking
+	ToolStatusIdle                         // tool is waiting for input
+	ToolStatusPrompting                    // tool is requesting user approval
+	ToolStatusError                        // tool encountered an error
+)
+
+func (s ToolStatus) String() string {
+	switch s {
+	case ToolStatusBusy:
+		return "busy"
+	case ToolStatusIdle:
+		return "idle"
+	case ToolStatusPrompting:
+		return "prompting"
+	case ToolStatusError:
+		return "error"
+	default:
+		return "unknown"
+	}
+}
+
+// StatusProvider abstracts how a tool's runtime status is observed.
+// The CLI/tmux implementation wraps pattern matching against pane content.
+// A future ACP implementation wraps event subscription.
+type StatusProvider interface {
+	Status() ToolStatus           // busy, idle, prompting, error
+	LastActivity() time.Time
+	SessionID() (string, bool)    // (id, detected)
+}
+```
+
+**Rationale:** Every consumer that needs to know "is the tool busy?" or "what's the session ID?" should go through this interface. Today there is only one implementation (tmux scraping), but the interface boundary costs nothing and makes the ACP transition (Phase 7+) a matter of adding a new implementation rather than rewriting call sites.
+
+At this phase, no callers need to be refactored — the interface is defined and documented. Wiring consumers to use it can happen incrementally in Phase 4 (status detection) and Phase 5 (conductor integration).
+
 ## Tests to Add/Update
 
 - **Config parsing round-trip:** Add a test that parses a `config.toml` containing `[copilot]` section and verifies defaults.
@@ -214,3 +265,7 @@ env_file = "~/.copilot.env"
 - [ ] Config reference Table of Contents includes `[copilot]`
 - [ ] Config reference Complete Example includes `[copilot]` section
 - [ ] Built-in icons list includes `copilot=🛸`
+- [ ] `StatusProvider` interface defined in `internal/session/status_provider.go`
+- [ ] `ToolStatus` type with `Unknown`, `Busy`, `Idle`, `Prompting`, `Error` constants
+- [ ] `StatusProvider` has `Status()`, `LastActivity()`, and `SessionID()` methods
+- [ ] Unit test validates `ToolStatus.String()` output

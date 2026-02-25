@@ -31,7 +31,9 @@ After every substantial work session:
 
 2. **Merge the decision inbox:**
    - Read all files in `.squad/decisions/inbox/`
-   - APPEND each decision's contents to `.squad/decisions.md`
+   - Validate each file follows the canonical format (see `.squad/templates/decision-format.md`):
+     each file has exactly one `### ` block with `**By:**`, `**Status:**`, `**What:**`, `**Why:**` in order
+   - APPEND each decision's contents to `.squad/decisions.md`, preceded by `---`
    - Delete each inbox file after merging
 
 3. **Deduplicate and consolidate decisions.md:**
@@ -41,9 +43,10 @@ After every substantial work session:
      a. Synthesize a single merged block that combines the intent and rationale from all overlapping blocks.
      b. Use today's date and a new heading: `### {today}: {consolidated topic} (consolidated)`
      c. Credit all original authors: `**By:** {Name1}, {Name2}`
-     d. Under **What:**, combine the decisions. Note any differences or evolution.
-     e. Under **Why:**, merge the rationale, preserving unique reasoning from each.
-     f. Remove the original overlapping blocks.
+     d. Set `**Status:**` to the most advanced status among the merged blocks.
+     e. Under `**What:**`, combine the decisions. Note any differences or evolution.
+     f. Under `**Why:**`, merge the rationale, preserving unique reasoning from each.
+     g. Remove the original overlapping blocks.
    - Write the updated file back. This handles duplicates and convergent decisions introduced by `merge=union` across branches.
 
 4. **Propagate cross-agent updates:**
