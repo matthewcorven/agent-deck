@@ -18,3 +18,13 @@ Binary: `copilot` (standalone, `brew install copilot-cli@prerelease` or `npm ins
 <!-- Append Copilot integration patterns, decisions, and file paths below -->
 
 - **2026-02-24:** Updated `docs/plans/copilot-cli/phase-0-live-capture.md` with additional captures per Ripley's recommendations: CLI metadata section (2a: --help, --version, ~/.copilot/ dir structure), MCP server output and pane title rows in the states table, dual-mode capture (plain text + ANSI escapes), and expanded commit/exit criteria. These captures feed Phase 2 (command builder flags), Phase 3 (session ID detection), and status detection patterns.
+
+- **2026-02-24 — CLI vs SDK/ACP Deep Analysis:**
+  - Researched three "SDK" concepts: ACP (Agent Client Protocol), Copilot Language Server (`@github/copilot-language-server`), and Copilot Extensions SDK (`copilot-extensions/preview-sdk.js`).
+  - **Copilot Extensions SDK is NOT relevant** — it's for building server-side extensions inside Copilot Chat, not for controlling Copilot from external tools.
+  - **ACP is the relevant programmatic approach** — `copilot --acp --stdio` / `copilot-language-server --acp` provides JSON-RPC structured communication: `session/new`, `session/load`, `session/prompt`, `session/update`, `session/cancel`, `session/request_permission`.
+  - ACP offers superior status detection (structured events vs tmux scraping) and richer control (cancel, permission flows, tool call visibility), but requires implementing fs provider, terminal provider, permission UI, and a Go JSON-RPC bidi client — essentially mini-IDE capabilities.
+  - ACP mode is "Preview", protocol v1, SDK at v0.14.1 (TypeScript-only, no Go SDK). Listed in ACP Registry as "GitHub Copilot 1.430.0".
+  - **Key finding:** Dual-process hybrid (CLI for display + ACP sidecar for status) doesn't work — they'd be separate sessions with separate contexts.
+  - **Recommendation:** CLI for v1 (~37h), ACP as Phase 7+ alternative mode (~89h for ACP track). Decision filed at `.squad/decisions/inbox/parker-copilot-cli-vs-sdk.md`.
+  - Full analysis: `docs/plans/copilot-cli/copilot-cli-vs-sdk-analysis.md`
