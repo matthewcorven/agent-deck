@@ -1,0 +1,28 @@
+
+   dotnet new webapp
+
+  Key Links
+
+   - Get started tutorial (https://learn.microsoft.com/aspnet/core/tutorials/razor-pages/razor-page
+  s-start?view=aspnetcore-10.0)
+   - Razor syntax reference
+  (https://learn.microsoft.com/aspnet/core/mvc/views/razor?view=aspnetcore-10.0)
+   - Authorization conventions (https://learn.microsoft.com/aspnet/core/security/authorization/razo
+  r-pages-authorization?view=aspnetcore-10.0)
+
+❯ something completed unexpected
+
+◐ The user's request is "something completed unexpected" which is quite ambiguous. I need to ask
+  clarifying questions before I can create a plan. Let me ask what they mean.
+
+∙ Thinking (Esc to cancel · 183 B)
+
+ ~/git/matthewcorven/agent-deck [⎇ main*]                            claude-sonnet-4.6 (medium) (1x)
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+❯  Describe a plan. Type @ to mention files, / for commands, or ? for shortcuts
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+ plan · shift+tab switch mode ​                                 @Idle-ansi.txt · Remaining reqs.: 0%
+
+
+
+

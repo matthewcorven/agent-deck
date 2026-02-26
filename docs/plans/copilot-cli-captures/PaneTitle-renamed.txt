@@ -1,0 +1,28 @@
+│  Copilot uses AI, so always check for mistakes.                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+● 💡 No copilot instructions found. Run /init to generate a copilot-instructions.md file for this
+  project.
+
+● Environment loaded: 3 MCP servers, 1 plugin, 6 skills, 1 agent
+
+● Connected to Visual Studio Code - Insiders
+
+● Session renamed to: boo
+
+ ~/git/matthewcorven/agent-deck [⎇ main*]                            claude-sonnet-4.6 (medium) (1x)
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+❯  Type @ to mention files, / for commands, or ? for shortcuts
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+ shift+tab switch mode ​                                        Remaining reqs.: -597.7766666666666%
+
+
+
+
+
+
+
+
+
+
+

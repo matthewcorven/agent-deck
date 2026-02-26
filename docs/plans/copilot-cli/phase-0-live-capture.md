@@ -16,14 +16,14 @@ Every other tool (Claude, Gemini, OpenCode, Codex) was integrated by first obser
 
 ## Tasks
 
-### 1. Install & authenticate
+### 1. ✅ Install & authenticate
 
 ```bash
 brew install copilot-cli@prerelease  # or: npm install -g @github/copilot
 copilot                     # launches interactive TUI; follow /login flow
 ```
 
-### 2a. Capture CLI metadata
+### 2a. ✅ Capture CLI metadata
 
 These are one-time captures (not state-dependent) that feed directly into later phases.
 
@@ -44,44 +44,29 @@ copilot --version > captures/cli-version.txt
 ls -laR ~/.copilot/ > captures/copilot-dir-structure.txt 2>&1
 ```
 
-### 2b. Capture terminal content in each state
+### 2b. ✅ Capture terminal content in each state
 
 Launch `copilot` inside a tmux pane, then capture output at each stage.
 
-**Dual-mode capture:** For every state, capture BOTH plain text and ANSI escape sequences. Plain text is what patterns match against; the escape-sequence version helps distinguish real text from TUI rendering artifacts (spinners, cursor positioning, color codes).
+> **Completed 2026-02-25.** All 9 states captured in dual mode (plain text + ANSI). Files committed to `docs/plans/copilot-cli-captures/`. See `findings.md` §5 for full analysis.
 
-```bash
-# Plain text (pattern matching)
-tmux capture-pane -p -t <pane> > captures/<state>.txt
-# With ANSI escapes (artifact analysis)
-tmux capture-pane -p -e -t <pane> > captures/<state>-ansi.txt
-```
+States captured: Startup, Idle, Thinking, Tool, Plan, Error, MCP, PaneTitle, PaneTitle-renamed (× 2 modes = 18 files).
 
-States to capture:
-
-| State | What to look for |
-|-------|-----------------|
-| **Startup / welcome banner** | Any session ID displayed, version info, greeting |
-| **Idle / awaiting input** | The prompt line (e.g., `>`, `copilot>`, or freeform input area) |
-| **Thinking / busy** | Spinner text, "esc to interrupt", tool execution progress |
-| **Tool approval prompt** | "1. Yes / 2. Yes, and approve TOOL... / 3. No..." |
-| **Plan mode prompt** | After Shift+Tab – different prompt indicator? |
-| **`/compact` auto-compaction** | Any visible progress text during compaction |
-| **Error states** | Network failure, auth expiry, permission denied |
-| **MCP server output** | Look for lines like "Connected to GitHub MCP server" or custom MCP config announcements. The Copilot CLI ships with a built-in GitHub MCP server — if it announces in the TUI, this affects status detection patterns and MCP pooling integration in later phases. |
-| **Pane title** | Run `tmux display-message -p '#{pane_title}'` while Copilot is active. Some CLIs set the terminal/pane title dynamically — if Copilot does this, it could serve as an alternative detection signal alongside content scraping (potentially more reliable for state detection). |
-
-### 3. Determine session ID detection strategy (**GATING DELIVERABLE**)
+### 3. ✅ Determine session ID detection strategy (**GATING DELIVERABLE — RESOLVED**)
 
 > This task is a **hard gate**. Its outcome determines whether Phase 3 (Session Detection + Resume) can proceed. If no reliable session ID extraction method is found, document that finding explicitly and record the fallback strategy.
 
 Answer these questions from the live session:
 
-- Is a session ID printed in the **welcome banner**?
-- Can session IDs be read from `~/.copilot/` storage files? What format?
-- Does `--continue` reliably resume the last session without an explicit ID?
-- Is the session ID visible in `/usage` output?
-- What is the session ID format? (UUID, hash, incremental?)
+- Is a session ID printed in the **welcome banner**? **→ No.** Welcome banner shows `Welcome {username}!` only.
+- Can session IDs be read from `~/.copilot/` storage files? What format? **→ Yes.** `~/.copilot/session-state/{workspace-uuid}/workspace.yaml` contains workspace ID, `cwd`, `git_root`, `repository`, `branch`. Session ID found as directory name under `session-state/` with `events.jsonl`. Both are UUID v4.
+- Does `--continue` reliably resume the last session without an explicit ID? **→ Not yet confirmed** (requires restart test). Serves as fallback.
+- Is the session ID visible in `/usage` output? **→ Not tested.** The `/session` modal shows it, but that modal is a blocking TUI overlay not suitable for scraping.
+- What is the session ID format? (UUID, hash, incremental?) **→ UUID v4** (standard 8-4-4-4-12 hex).
+
+**Strategy chosen: Option A (filesystem-based) + Option C (`--continue`) fallback.** See `docs/plans/copilot-cli-captures/findings.md` for full rationale. Decision recorded in `.squad/decisions/inbox/ripley-phase0-session-id-strategy.md`.
+
+**Key architectural note:** Copilot uses TWO distinct UUIDs — a workspace ID (process-scoped, in `workspace.yaml`) and a session ID (conversational, in `events.jsonl` directory). Agent Deck will track both in the Instance struct, following the dual-ID pattern.
 
 **Fallback strategy if no session ID is discoverable:**
 
@@ -89,17 +74,28 @@ Answer these questions from the live session:
 2. **`--continue` only** — If the CLI supports `--continue` (resume last session) but exposes no explicit session ID, Agent Deck can use that flag without needing to know the ID. Multi-session resume would not be possible.
 3. **Defer Phase 3** — If neither option is viable, Phase 3 is deferred until ACP (Phase 7+) provides programmatic session access. Document this as a known limitation.
 
-### 4. Draft preliminary patterns
+### 4. ✅ Draft preliminary patterns
 
-Based on captures, draft the `DefaultRawPatterns("copilot")` block:
+> **Completed 2026-02-25.** Full analysis in `findings.md` §5–§6. Pattern confidence assessed per-signal.
+
+Based on all captures, the drafted `DefaultRawPatterns("copilot")` block:
 
 ```go
 case "copilot":
     return &RawPatterns{
-        BusyPatterns:   []string{/* fill from captures */},
-        PromptPatterns: []string{/* fill from captures */},
+        BusyPatterns: []string{
+            "Esc to cancel",       // PRIMARY: universal busy indicator across all active states
+            `re:(?m)^[◉◐◎∙]\s`,   // SECONDARY: state icon at line start during processing
+            "ctrl+q enqueue",      // TERTIARY: status bar hint, only present during active processing
+        },
+        PromptPatterns: []string{
+            "Type @ to mention files", // PRIMARY: stable prompt hint in idle state (normal + plan mode)
+            "Describe a task to get started", // SECONDARY: welcome banner initial state
+        },
     }
 ```
+
+**Key design choices:** No `SpinnerChars` — Copilot uses state icons, not cycling spinners. No `ErrorPatterns` — struct doesn't have that field; errors return to idle. Pattern mirrors the Codex block structure (strings + one regex, no whimsical words).
 
 ### 5. Commit findings
 
@@ -117,11 +113,11 @@ Create `docs/plans/copilot-cli-captures/` with:
 
 ## Exit Criteria
 
-- [ ] CLI metadata captured and committed (`cli-help.txt`, `cli-version.txt`, `copilot-dir-structure.txt`)
-- [ ] Captured terminal content files committed to `docs/plans/copilot-cli-captures/` (plain text + ANSI pairs)
-- [ ] **HARD GATE:** Session ID detection strategy documented in `findings.md` — must explicitly state whether a reliable extraction method exists. If not, the chosen fallback strategy must be recorded. Phase 3 is blocked until this is resolved.
-- [ ] Preliminary `DefaultRawPatterns("copilot")` drafted (even if approximate)
-- [ ] Any new CLI flags or behaviors not in the design doc are noted
+- [x] CLI metadata captured and committed (`cli-help.txt`, `cli-version.txt`, `copilot-dir-structure.txt`)
+- [x] Captured terminal content files committed to `docs/plans/copilot-cli-captures/` (plain text + ANSI pairs) — 9 states × 2 modes = 18 files
+- [x] **HARD GATE:** Session ID detection strategy documented in `findings.md` — filesystem-based via `workspace.yaml` (Option A) with `--continue` fallback (Option C). Phase 3 is unblocked.
+- [x] Preliminary `DefaultRawPatterns("copilot")` drafted — see `findings.md` §6. Includes 3 busy patterns, 2 prompt patterns, confidence assessment per signal.
+- [x] New observations documented: no pane title support, state icons (not cycling spinners), `✗` error marker, plan mode covered by shared prompt pattern. No undocumented CLI flags found.
 
 ## Notes
 

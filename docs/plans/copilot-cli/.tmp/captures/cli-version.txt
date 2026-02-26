@@ -1,0 +1,2 @@
+GitHub Copilot CLI 0.0.417.
+Run 'copilot update' to check for updates.

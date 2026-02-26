@@ -98,6 +98,24 @@ Incorporated two findings from the CLI vs ACP review into the phase docs:
 **Dual-ID model discovered:**
 - **Workspace ID** — process-scoped UUID in `workspace.yaml`, created per `copilot` invocation. Use for directory-based session matching.
 - **Session ID** — conversational session UUID, found as directory name containing `events.jsonl`. Use for resume/history operations.
+
+### 2026-02-25 — Phase 0 TUI Capture Analysis: Pattern Strategy for Copilot CLI
+
+Analyzed all 9 TUI state captures (Startup, Idle, Thinking, Tool, Plan, Error, MCP, PaneTitle, PaneTitle-renamed). Key architectural findings:
+
+**Pattern strategy decided: String-primary, no SpinnerChars.** Copilot uses state icons (`◉◐◎∙`), not cycling spinners. These are per-state indicators — `◉` = loading/thinking, `◐` = streaming, `◎` = tool execution, `∙` = plan-mode thinking. Handled via regex `^[◉◐◎∙]\s` in BusyPatterns. No SpinnerChars/WhimsicalWords — would be architecturally misleading.
+
+**Primary busy signal:** `Esc to cancel` — appears in EVERY active processing state. Highest confidence. Case: capital "E" (differs from Gemini's lowercase "esc to cancel").
+
+**Primary idle signal:** `Type @ to mention files` — appears in both normal mode and plan mode idle states. Highest confidence.
+
+**No pane title support:** Copilot CLI does not set a custom tmux pane title. Detection must rely entirely on content scraping. This is a limitation vs. tools that do set titles.
+
+**Error marker:** `✗ Execution failed:` observed but cannot be captured by current `RawPatterns` struct (no ErrorPatterns field). TUI returns to idle after errors, so prompt pattern catches the transition. Error-specific status can be added in Phase 4 if `StatusProvider.Status()` needs a distinct `Error` state.
+
+**Plan mode covered by shared pattern:** `Type @ to mention files` appears in both normal and plan mode idle prompts. No plan-mode-specific pattern needed. If distinct plan-mode detection is later required, `Describe a plan` can be added as a supplementary prompt pattern.
+
+**Phase 0 is complete.** All captures done, session ID strategy resolved, patterns drafted. Phase 1 and Phase 2 are fully unblocked.
 - Both are standard UUID v4 format. Instance struct needs `CopilotWorkspaceID` and `CopilotSessionID` fields.
 
 **`/session` TUI modal is NOT viable for scraping** — it's a blocking full-screen overlay with a live clock, requires `Enter` to dismiss. Confirms filesystem detection is the only reliable non-interactive approach.

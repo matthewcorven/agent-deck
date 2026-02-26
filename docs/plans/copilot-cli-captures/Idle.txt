@@ -1,0 +1,24 @@
+
+➜  agent-deck git:(main) ✗ sleep 10 && copilot
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  ╭─╮╭─╮                                                                                          │
+│  ╰─╯╰─╯  GitHub Copilot v0.0.418                                                                 │
+│  █ ▘▝ █  Describe a task to get started.                                                         │
+│   ▔▔▔▔                                                                                           │
+│  Tip: /review Run code review agent to analyze changes                                           │
+│  Copilot uses AI, so always check for mistakes.                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+● 💡 No copilot instructions found. Run /init to generate a copilot-instructions.md file for this
+  project.
+
+● Environment loaded: 3 MCP servers, 1 plugin, 6 skills, 1 agent
+
+● Connected to Visual Studio Code - Insiders
+
+ ~/git/matthewcorven/agent-deck [⎇ main*]                            claude-sonnet-4.6 (medium) (1x)
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+❯  Type @ to mention files, / for commands, or ? for shortcuts
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+ shift+tab switch mode ​                         @Startup.txt · Remaining reqs.: -596.7766666666666%
+

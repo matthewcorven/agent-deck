@@ -1,0 +1,28 @@
+  [37m└ {"results":[{"title":"What's new in ASP.NET Core 3.1","content":"# What's new...[39m
+
+[2m[37m◐[0m [2;3m[37mThe search results are mostly about Blazor and other ASP.NET Core features. Let me search more [0m
+  [2;3m[37mspecifically for Razor Pages documentation and fetch the latest release notes page for ASP.NET [0m
+  [2;3m[37mCore 10.0 or 9.0 with Razor Pages focus.[0m
+
+[32m●[39m [1mMicrosoft Docs Search: [0m[37mASP.NET Core Razor Pages introduction overview .NET 9 .NET 10[39m
+  [37m└ {"results":[{"title":"Tutorial: Get started with Razor Pages in ASP.NET Core"...[39m
+
+[32m●[39m [1mMicrosoft Docs Fetch: [0m[37mhttps://learn.microsoft.com/aspnet/core/razor-pages/?view=aspnetcore-9.0[39m
+  [37m└ # Razor Pages architecture and concepts in ASP.NET Core[39m
+
+[2m[37m◐[0m [2;3m[37mThe fetch returned .NET 9 docs but noted that .NET 10 is the current release. Let me also fetch [0m
+  [2;3m[37mthe .NET 10 version specifically.[0m
+
+[32m●[39m [1mMicrosoft Docs Fetch: [0m[37mhttps://learn.microsoft.com/aspnet/core/razor-pages/?view=aspnetcore-10.0[39m
+  [37m└ # Razor Pages architecture and concepts in ASP.NET Core[39m
+
+[35m●[39m [97mHere's a summary of the latest [1mASP.NET Core Razor Pages[0m[97m documentation ([1m.NET 10[0m[97m is the current[39m
+
+[35m◎ Fetching Razor[95m [35mPages docs[39m [37m(Esc to cancel · 1.1 KiB)[39m
+
+ [37m~/git/matthewcorven/agent-deck [⎇ main*][39m                            [37mclaude-sonnet-4.6 (medium) (1x)[39m
+[2m[37m─────────────────────────────────────────────────────────────────────────────────────────────────────
+[0m[37m❯ [7m[39m [0;2mType @ to mention files, / for commands, or ? for shortcuts[0m
+[2m[37m─────────────────────────────────────────────────────────────────────────────────────────────────────
+[0m [1m[37mshift+tab[0m[37m switch mode[39m [37m·[39m [1m[37mctrl+q[0m[37m enqueue[39m ​                       [38;2;36;191;165m@Idle-ansi.txt[39m [37m·[39m [37mRemaining reqs.: 0%[39m
+

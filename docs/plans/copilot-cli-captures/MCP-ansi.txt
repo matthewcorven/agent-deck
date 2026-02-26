@@ -1,0 +1,28 @@
+[1m[32m➜  [36magent-deck[0m [1m[34mgit:([31mmain[34m) [33m✗[0m sleep 10 && copilot
+[35m╭──────────────────────────────────────────────────────────────────────────────────────────────────╮[39m
+[35m│[39m  [36m╭─╮╭─╮[39m                                                                                          [35m│[39m
+[35m│[39m  [36m╰─╯╰─╯[39m  [1m[35mGitHub Copilot[0m [37mv0.0.418[39m                                                                 [35m│[39m
+[35m│[39m  [35m█ [32m▘▝[35m █[39m  [37mDescribe a task to get started.[39m                                                         [35m│[39m
+[35m│[39m  [35m ▔▔▔▔ [39m                                                                                          [35m│[39m
+[35m│[39m  [37mTip: [36m/instructions[37m View and toggle custom instruction files[39m                                     [35m│[39m
+[35m│[39m  [37mCopilot uses AI, so always check for mistakes.[39m                                                  [35m│[39m
+[35m╰──────────────────────────────────────────────────────────────────────────────────────────────────╯[39m
+
+[34m●[39m 💡 No copilot instructions found. Run /init to generate a copilot-instructions.md file for this
+  project.
+
+[34m●[39m Environment loaded: 3 MCP servers, 1 plugin, 6 skills, 1 agent
+
+[34m●[39m Connected to Visual Studio Code - Insiders
+
+ [37m~/git/matthewcorven/agent-deck [⎇ main*][39m                            [37mclaude-sonnet-4.6 (medium) (1x)[39m
+[2m[37m─────────────────────────────────────────────────────────────────────────────────────────────────────
+[0m[37m❯ [7m[39m [0;2mType @ to mention files, / for commands, or ? for shortcuts[0m
+[2m[37m─────────────────────────────────────────────────────────────────────────────────────────────────────
+[0m [1m[37mshift+tab[0m[37m switch mode[39m ​                                        [37mRemaining reqs.: -597.7766666666666%[39m
+
+
+
+
+
+
