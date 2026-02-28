@@ -1,0 +1,49 @@
+➜  agent-deck git:(main) ✗ copilot --resume=11d97e41-46eb-4980-ad8c-dc32e
+6eb3bb0
+╭───────────────────────────────────────────────────────────────────────╮
+│                                 ╭─╮╭─╮                                │
+│                                 ╰─╯╰─╯                                │
+│                                 █ ▘▝ █                                │
+│                                  ▔▔▔▔                                 │
+│                         GitHub Copilot v0.0.420                       │
+│                  Copilot uses AI. Check for mistakes.                 │
+│                                                                       │
+╰───────────────────────────────────────────────────────────────────────╯
+
+❯ how many cultures have a flood origin story?
+
+● web_search: how many cultures worldwide have a flood myth or flood
+origin story
+  └ {"type":"text","text":{"value":"Flood myths or great deluge origi...
+
+● Scholars have documented at least 200 distinct flood myths across
+  human cultures — found on every inhabited continent. Victorian
+  anthropologist Sir James Frazer catalogued over 200 independent
+  examples in the early 20th century.
+
+  Common structural themes across cultures: a divine judgment, a warned
+  righteous individual, a vessel for survival, and world renewal
+  afterward. The universality is attributed to prehistoric flood
+  memories, psychological archetypes, or early human migration
+  diffusing a core story.
+
+● Error auto updating: Failed to fetch latest release: HttpError: Bad
+  credentials - https://docs.github.com/rest
+
+● Environment loaded: 3 MCP servers, 1 plugin, 6 skills, 1 agent,
+  Visual Studio Code - Insiders connected
+
+ ~/git/.../agent-deck [⎇ main*]          claude-sonnet-4.6 (medium) (1x)
+─────────────────────────────────────────────────────────────────────────
+❯  Type @ to mention files, # for issues/PRs, / for commands, or ? for
+  shortcuts
+─────────────────────────────────────────────────────────────────────────
+ shift+tab switch mode ​                       Remaining reqs.: -600.11%
+
+
+
+
+
+
+
+

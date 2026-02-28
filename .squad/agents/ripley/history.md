@@ -135,3 +135,20 @@ Analyzed all 9 TUI state captures (Startup, Idle, Thinking, Tool, Plan, Error, M
 **Findings written to:** `docs/plans/copilot-cli-captures/findings.md`
 **Decision recorded:** `.squad/decisions/inbox/ripley-phase0-session-id-strategy.md`
 **Phase 0 doc updated:** Tasks 1, 2a, 3 marked ✅. Exit criteria updated.
+
+### 2026-02-28 — Phase 0 Resume Capture Analysis: All Ambiguities Closed
+
+Analyzed 4 resume captures (Resume_11d97e41, Resume_155f69ab, plus ANSI variants). Phase 0 is now fully complete — no remaining open questions.
+
+**Key findings:**
+- **`--resume` accepts both workspace UUID and session UUID.** Both successfully restore the target session with full conversation history. The CLI's exit message canonically recommends the workspace UUID (`Resume this session with copilot --resume=<workspace-uuid>`), even when the session was resumed by session UUID. This confirms workspace UUID as the primary resume key for Agent Deck.
+- **`--continue` confirmed working** — returns to the previous session (Matthew manual test).
+- **Welcome banner is version-unstable:** Changed from "Describe a task to get started" (v0.0.418) to "Copilot uses AI. Check for mistakes." (v0.0.420). Dropped `"Describe a task to get started"` from PromptPatterns draft. The primary `"Type @ to mention files"` pattern is confirmed stable across both versions.
+- **events.jsonl structure mapped:** Event types include `session.start`, `user.message`, `assistant.turn_start/message/turn_end`, `tool.execution_start/complete`, `session.model_change`. `session.start` payload contains `sessionId`, `copilotVersion`, `context: {cwd, gitRoot, branch, repository}`. Parent-child chain via `parentId`. Valuable as an alternative/supplementary detection path to `workspace.yaml`.
+- **New observable patterns:** Exit summary block (session time, code changes, resume hint), `IDE connection lost:`, `Error auto updating:`, user-aborted ops (`✗` + `Operation aborted by user`).
+
+**Decisions recorded:**
+- `.squad/decisions/inbox/ripley-resume-analysis.md` — workspace UUID is canonical for `--resume`
+- `.squad/decisions/inbox/ripley-pattern-fragility.md` — drop "Describe a task to get started" from PromptPatterns
+
+**Findings updated:** `docs/plans/copilot-cli-captures/findings.md` — §6 revised, §7 updated, §8 appended.

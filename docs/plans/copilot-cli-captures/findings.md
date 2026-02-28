@@ -291,7 +291,6 @@ case "copilot":
         },
         PromptPatterns: []string{
             "Type @ to mention files", // PRIMARY: stable prompt hint in idle state (normal + plan mode)
-            "Describe a task to get started", // SECONDARY: welcome banner initial state
         },
     }
 ```
@@ -313,21 +312,157 @@ case "copilot":
 | `Esc to cancel` | HIGH | Core UX element — removal would break the user's cancel affordance |
 | `re:(?m)^[◉◐◎∙]\s` | MEDIUM | Unicode chars could change across versions; regex handles the current set |
 | `ctrl+q enqueue` | LOW-MEDIUM | Keyboard shortcut could be remapped or removed |
-| `Type @ to mention files` | HIGH | Core input affordance — fundamental to the TUI's usability |
-| `Describe a task to get started` | MEDIUM | Welcome banner text could change; only seen once per session |
+| `Type @ to mention files` | HIGH | Core input affordance — fundamental to the TUI's usability. Confirmed stable across v0.0.418 → v0.0.420 (prompt text expanded with `# for issues/PRs` but core substring unchanged). |
+
+> **NOTE (2026-02-28):** `"Describe a task to get started"` was **removed** from PromptPatterns. This welcome banner text changed to `"Copilot uses AI. Check for mistakes."` between v0.0.418 and v0.0.420, confirming version instability. The primary `Type @ to mention files` pattern is sufficient and stable across both versions.
 
 ---
 
 ## 7. Summary
 
-**All Phase 0 captures are complete.** Task 2b (TUI state captures) produced 9 state pairs (18 files total). Task 3 (session ID detection) was resolved in the previous session. Task 4 (preliminary `DefaultRawPatterns`) is drafted above.
+**Phase 0 is FULLY COMPLETE.** All capture tasks, session ID detection, resume testing, and pattern drafting are done.
+
+**Capture inventory:** 9 TUI state pairs (18 files) + 4 resume captures (2 plain + 2 ANSI) = 22 total capture files.
 
 **Key findings:**
 1. **`Esc to cancel`** is the single most reliable busy indicator — appears in every active processing state.
-2. **`Type @ to mention files`** is the single most reliable idle indicator — appears in both normal and plan mode.
+2. **`Type @ to mention files`** is the single most reliable idle indicator — appears in both normal and plan mode. Confirmed stable across v0.0.418 → v0.0.420.
 3. Copilot uses **state icons** (`◉◐◎∙`), not cycling spinners. They serve as a secondary busy signal via regex.
 4. **No custom pane title** is set by Copilot CLI — detection must rely on content scraping only.
 5. **Error state** (`✗`) is observable but not captured by the current pattern struct; deferred to Phase 4.
 6. **Plan mode** is covered by the same prompt pattern (`Type @ to mention files`); no special handling needed.
+7. **`--resume` accepts both workspace UUID and session UUID** — both work. The CLI's exit message canonically recommends the workspace UUID.
+8. **`--continue` confirmed working** — returns to the previous session.
+9. **`events.jsonl`** contains rich structured JSON with session metadata, event types, and parent-child chains — valuable for future analytics and session reconstruction.
+10. **Welcome banner text is version-unstable** — changed from "Describe a task to get started" (v0.0.418) to "Copilot uses AI. Check for mistakes." (v0.0.420). Dropped from PromptPatterns.
 
-**Phase 0 is effectively complete.** The exit criteria are met: captures committed, session ID strategy resolved, preliminary patterns drafted. Phase 1 (config surface) and Phase 2 (command builder) are unblocked.
+**All ambiguity items resolved:** `--resume` ID type (§8, item #1), `--continue` behavior (§8, item #2), `events.jsonl` content (§8, item #4). Phase 1 (config surface) and Phase 2 (command builder) are fully unblocked.
+
+---
+
+## 8. Resume & Session Lifecycle Analysis
+
+> **Analyst:** Ripley (Lead)  
+> **Date:** 2026-02-28  
+> **Captures reviewed:** `Resume_11d97e41.txt`, `Resume_11d97e41-ansi.txt`, `Resume_155f69ab.txt`, `Resume_155f69ab-ansi.txt`  
+> **Copilot CLI version:** 0.0.420 (upgraded from 0.0.418 in original captures)
+
+### 8a. `--resume` Accepts Both ID Types
+
+Both workspace UUID and session UUID successfully resume sessions:
+
+| Capture | Command | ID Type | Result |
+|---------|---------|---------|--------|
+| Resume_11d97e41 | `copilot --resume=11d97e41-46eb-4980-ad8c-dc32e6eb3bb0` | Workspace UUID | ✅ Resumed with full conversation history |
+| Resume_155f69ab | `copilot --resume 155f69ab-8c0f-4b4a-a0ae-87ba6f518176` | Session UUID | ✅ Resumed with full conversation history |
+
+Both `--resume=UUID` (equals syntax) and `--resume UUID` (space-separated) work.
+
+### 8b. Workspace UUID is Canonical for Resume
+
+**Critical finding:** When exiting the session that was resumed by session UUID (155f69ab), the CLI printed:
+
+```
+Resume this session with copilot --resume=11d97e41-46eb-4980-ad8c-dc32e6eb3bb0
+```
+
+This is the **workspace UUID**, not the session UUID used to resume. The CLI itself canonically recommends the workspace UUID for resume operations — regardless of which ID type was used to enter the session.
+
+**Architectural implication:** Agent Deck should use `CopilotWorkspaceID` (from `workspace.yaml`) as the primary resume key. This aligns perfectly with the filesystem detection strategy — `workspace.yaml` already provides this UUID directly alongside `cwd`/`git_root` for matching.
+
+### 8c. `--continue` Confirmed Working
+
+Matthew confirmed that `copilot --continue` returns to the previous session. This validates our fallback strategy: if filesystem detection fails to find a workspace UUID, `--continue` can resume the most recent session without an explicit ID.
+
+### 8d. Exit Summary Block
+
+The ANSI capture (`Resume_155f69ab-ansi.txt`) captured a full exit sequence with these new patterns:
+
+```
+● IDE connection lost: Visual Studio Code - Insiders closed
+
+ Total usage est:        0 Premium requests
+ API time spent:         0s
+ Total session time:     65h 24m 9s
+ Total code changes:     +0 -0
+
+ Resume this session with copilot --resume=11d97e41-46eb-4980-ad8c-dc32e6eb3bb0
+```
+
+**New observable patterns:**
+
+| Pattern | Signal | Notes |
+|---------|--------|-------|
+| `IDE connection lost:` | IDE disconnected | Followed by IDE name. Informational, not fatal — session survives. |
+| `Total session time:` | Exit summary | Session duration metric. Could feed analytics. |
+| `Total code changes:` | Exit summary | Lines changed metric (+N -N format). |
+| `Resume this session with copilot` | Exit hint | Contains the canonical workspace UUID for resume. Could be scraped as a session-end marker. |
+
+### 8e. Version Drift Observations (v0.0.418 → v0.0.420)
+
+| Element | v0.0.418 | v0.0.420 | Impact |
+|---------|----------|----------|--------|
+| Welcome banner | "Describe a task to get started" | "Copilot uses AI. Check for mistakes." | **BREAKING** for pattern detection — dropped from PromptPatterns |
+| Prompt text | `Type @ to mention files, / for commands, or ? for shortcuts` | `Type @ to mention files, # for issues/PRs, / for commands, or ? for shortcuts` | Non-breaking — core substring `Type @ to mention files` still present |
+| Auto-update error | Not observed | `● Error auto updating: Failed to fetch latest release: HttpError: Bad credentials` | New informational pattern; not an error in our context |
+
+The version drift between two minor versions (418 → 420) reinforces the strategy of using minimal, high-confidence patterns rather than broad matching.
+
+### 8f. User-Aborted Operation Pattern
+
+Resume_155f69ab shows a user-aborted tool execution:
+
+```
+✗ Look for plugin.json files and plugin directories
+  $ find /Users/core/git/matthewcorven/agent-deck -name "plugin.json" ...
+  Operation aborted by user
+```
+
+The `✗` prefix (already cataloged in §5b as "Error / failure") also appears for user-initiated cancellations. The text `Operation aborted by user` distinguishes user-cancel from execution errors (`Execution failed:`). This is informational for Phase 4 — if `StatusProvider.Status()` needs to distinguish error types.
+
+### 8g. events.jsonl Structure
+
+From `head -30 ~/.copilot/session-state/*/events.jsonl`:
+
+**Event types observed:**
+- `session.start` — Session initialization with metadata
+- `session.model_change` — Model selection changes
+- `user.message` — User input
+- `assistant.turn_start` — Beginning of assistant response
+- `assistant.message` — Assistant output
+- `tool.execution_start` — Tool invocation begins
+- `tool.execution_complete` — Tool invocation ends
+- `assistant.turn_end` — End of assistant response
+
+**`session.start` payload:**
+```json
+{
+  "sessionId": "<uuid>",
+  "version": "<semver>",
+  "producer": "copilot-cli",
+  "copilotVersion": "<semver>",
+  "startTime": "<iso-timestamp>",
+  "selectedModel": "<model-name>",
+  "context": {
+    "cwd": "<path>",
+    "gitRoot": "<path>",
+    "branch": "<branch>",
+    "repository": "<owner/repo>"
+  }
+}
+```
+
+**Key structural properties:**
+- Every event has `id`, `timestamp`, and `parentId` fields
+- Parent-child chain via `parentId` enables conversation tree reconstruction
+- `session.start` contains all context needed for session matching (cwd, gitRoot, repository, branch)
+
+**Architectural value:** `events.jsonl` is a rich signal source for Phase 3 (session detection) and future analytics. The `session.start` event alone provides an alternative detection path — parse the last `session.start` event, match by `context.cwd`/`context.gitRoot`, and extract `sessionId`. This could supplement or replace `workspace.yaml` detection if workspace.yaml proves unreliable.
+
+### 8h. Ambiguity Items — Closed
+
+| # | Ambiguity | Resolution | Evidence |
+|---|-----------|------------|----------|
+| 1 | `--resume` ID type: workspace UUID vs session UUID? | **RESOLVED:** Both work. Workspace UUID is canonical — the CLI exit message recommends it. | Resume_11d97e41 (workspace UUID), Resume_155f69ab (session UUID), exit hint in Resume_155f69ab-ansi |
+| 2 | `--continue` behavior? | **RESOLVED:** Works. Returns to the previous session without an explicit ID. | Confirmed by Matthew (manual test). |
+| 4 | `events.jsonl` content? | **RESOLVED:** Rich structured JSON — session metadata, event stream with typed events, parent-child chain via `parentId`. Contains `session.start` with full context (cwd, gitRoot, branch, repository). | `head -30 ~/.copilot/session-state/*/events.jsonl` output. |

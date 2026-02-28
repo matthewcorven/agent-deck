@@ -105,3 +105,21 @@ type StatusProvider interface {
 **Status:** Decided
 **What:** The `DefaultRawPatterns("copilot")` block will use string-based busy/prompt patterns with one regex, following the Codex block structure. No `SpinnerChars` or `WhimsicalWords` — Copilot's state icons (`◉◐◎∙`) are static per-state indicators, not cycling animation characters. They're handled via a line-start regex (`re:(?m)^[◉◐◎∙]\s`) as a secondary busy signal. Primary busy: `Esc to cancel`. Primary idle: `Type @ to mention files`. Error detection deferred to Phase 4 (struct has no `ErrorPatterns` field).
 **Why:** Copilot's TUI model is fundamentally different from Claude's (state icons vs. cycling spinners). Forcing SpinnerChars/WhimsicalWords onto a tool that doesn't use them would create fragile, misleading patterns. The string-primary approach keeps Copilot's pattern block consistent with Gemini, OpenCode, and Codex — all non-Claude tools use simple string matching. The regex is a pragmatic addition for catching the state icon lines directly, following the Claude precedent of regex patterns in BusyPatterns.
+
+---
+
+### 2026-02-28: Drop "Describe a task to get started" from Copilot PromptPatterns
+
+**By:** Ripley (Lead)
+**Status:** Decided
+**What:** Removed `"Describe a task to get started"` from the drafted `DefaultRawPatterns("copilot")` PromptPatterns list. The welcome banner text changed between v0.0.418 ("Describe a task to get started") and v0.0.420 ("Copilot uses AI. Check for mistakes."), demonstrating version instability. The primary pattern `"Type @ to mention files"` remains — it is confirmed stable across both versions and covers both normal and plan mode idle states.
+**Why:** Pattern detection must be resilient to Copilot CLI version updates. A pattern that changed within 2 minor versions (0.0.418 → 0.0.420) is too fragile for production detection. The welcome banner is a cosmetic/branding element subject to frequent revision. In contrast, `"Type @ to mention files"` is a functional UX affordance that the CLI must maintain for usability — it tells users how to interact. Its core substring persisted even as the prompt was expanded with `# for issues/PRs`. One high-confidence pattern is better than one high + one fragile.
+
+---
+
+### 2026-02-28: --resume Takes Workspace UUID (Both IDs Accepted)
+
+**By:** Ripley (Lead)
+**Status:** Decided
+**What:** Copilot CLI's `--resume` flag accepts both workspace UUIDs and session UUIDs — both successfully restore the target session with full conversation history. However, the CLI's own exit message (`Resume this session with copilot --resume=<workspace-uuid>`) canonically recommends the **workspace UUID**. Agent Deck should use the workspace UUID as the primary resume identifier, with session UUID as an alternative. Both `--resume=UUID` and `--resume UUID` (space-separated) syntax are accepted.
+**Why:** Live resume captures (Resume_11d97e41 via workspace UUID, Resume_155f69ab via session UUID) both succeeded. Critically, when resuming by session UUID (155f69ab), the exit hint still printed the workspace UUID (11d97e41) — confirming workspace UUID as the canonical resume identifier. This aligns with our filesystem detection strategy: `workspace.yaml` already provides the workspace UUID directly, making it the natural key for resume operations. Using the canonical form also reduces the risk of breakage if session-UUID-based resume is ever deprecated.

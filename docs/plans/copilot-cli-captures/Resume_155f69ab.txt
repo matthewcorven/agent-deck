@@ -1,0 +1,49 @@
+[1m[32m➜  [36magent-deck[0m [1m[34mgit:([31mmain[34m) [33m✗[0m copilot --resume 155f69ab-8c0f-4b4a-a0ae-87ba6
+f518176
+[35m╭───────────────────────────────────────────────────────────────────────╮
+│[39m                                 [36m╭─╮╭─╮[39m                                [35m│
+│[39m                                 [36m╰─╯╰─╯[39m                                [35m│
+│[39m                                 [35m█ [32m▘▝[35m █[39m                                [35m│
+│[39m                                 [35m ▔▔▔▔ [39m                                [35m│
+│[39m                         [1m[35mGitHub Copilot[0m [37mv0.0.420[39m                       [35m│
+│[39m                  [37mCopilot uses AI. Check for mistakes.[39m                 [35m│
+│[39m                                                                       [35m│
+╰───────────────────────────────────────────────────────────────────────╯
+
+[34m●[39m Environment loaded: 3 MCP servers, 1 plugin, 6 skills, 1 agent
+
+[37m❯[39m [37m"Plugin skills and commands load from custom paths[39m
+  [37m  declared in plugin.json" - where exactly do you look?[39m
+
+[32m●[39m [1mfetch_copilot_cli_documentation[0m
+  [37m└ # GitHub Copilot CLI Documentation[39m
+
+[32m●[39m [1mGrep[0m [37m"plugin\.json" (/Users/core/git/matthewcorven/agent-deck)[39m
+  [37m└ No matches found[39m
+
+[32m●[39m [1mGrep[0m [37m"plugin\.json" (/Users/core/git/matthewcorven/agent-deck)[39m
+  [37m└ No matches found[39m
+
+[32m●[39m [1mGrep[0m [37m"plugin" in **/*.json (/Users/core/git/matthewcorven/agent-deck)[39m
+  [37m└ 1 file found[39m
+
+[1m[31m✗[39m Look for plugin.json files and plugin directories[0m
+  [37m$ find /Users/core/git/matthewcorven/agent-deck -name "plugin.json" [39m
+  [37m2>/dev/null; ls
+[39m  [37m/Users/core/git/matthewcorven/agent-deck/.claude-plugin/ 2>/dev/null; [39m
+  [37mls ~/.copilot/ 2>/dev/null[39m
+  [31mOperation aborted by user[39m
+
+[34m●[39m Error auto updating: Failed to fetch latest release: HttpError: Bad
+  credentials - https://docs.github.com/rest
+
+[34m●[39m Environment loaded: 3 MCP servers, 1 plugin, 6 skills, 1 agent,
+  Visual Studio Code - Insiders connected
+
+ [37m~/git/.../agent-deck [⎇ main*][39m          [37mclaude-sonnet-4.6 (medium) (1x)[39m
+[2m[37m─────────────────────────────────────────────────────────────────────────
+[0m[37m❯ [7m[39m [0;2mType @ to mention files, # for issues/PRs, / for commands, or ? for [0m
+  [2mshortcuts[0m
+[2m[37m─────────────────────────────────────────────────────────────────────────
+[0m [1m[37mshift+tab[0m[37m switch mode[39m ​                       [37mRemaining reqs.: -600.11%[39m
+
