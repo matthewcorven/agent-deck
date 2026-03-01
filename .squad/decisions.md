@@ -162,6 +162,15 @@ type StatusProvider interface {
 
 ---
 
+### 2026-03-01: Phase 6 Execution Plan — 5 Tasks, All Parallelizable, One Functional Change
+
+**By:** Ripley (Lead)
+**Status:** Completed
+**What:** Phase 6 execution plan verified against codebase. 2 of 7 tasks already complete (sample config, feature flag removal). 1 task deferred (experimental features). 5 actionable tasks identified — all independent and parallelizable: README tool table + "The Problem" update, troubleshooting section in `skills/agent-deck/references/troubleshooting.md`, session details panel for Copilot in `home.go`, and CHANGELOG entry for v0.20.0. Only Task 4 (session details panel) involves functional code; all others are documentation.
+**Why:** Task 4 is a visibility gap — CopilotSessionID is detected and stored by Phases 3-4 but never surfaced in the TUI. Users can't see the session ID for manual `--resume`. CHANGELOG version recommended as 0.20.0 (minor bump for new first-class tool), but Matthew should confirm. Full plan with exact files, line numbers, and content at `.squad/plans/phase-6-execution-plan.md`.
+
+---
+
 ### 2026-03-01: Copilot content detection patterns too broad — `\bcopilot\b` replaced with state-icon regex
 
 **By:** Lambert (Tester)

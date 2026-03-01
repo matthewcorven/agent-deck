@@ -153,6 +153,14 @@ Coordinator resolved the `\bcopilot\b` false-positive flagged in `TestDetectTool
 - `TestPreflightCopilot_Start_ReturnsError` — PATH=/nonexistent, tests preflight directly (Start() needs live tmux) → error contains both install methods (PASS)
 - `TestPreflightCopilot_EmptyGetCommand` — no config, PATH=/nonexistent → error references default "copilot" binary (PASS)
 
+### 2026-03-01T04:12:00Z — Phase 6: Settings Panel Tests Updated
+
+**Tests updated:**
+- `internal/ui/settings_panel_test.go`: Added copilot test cases, updated None default index from 4→5 to reflect new tool entry.
+- Verified all tests pass across ui, tmux, and cmd packages.
+
+**Cross-agent:** Ripley produced Phase 6 execution plan (5 tasks). Parker executed all 5 + bonus settings_panel.go hardcoded index fix. All files changed: README.md, CHANGELOG.md, troubleshooting.md, home.go, settings_panel.go, settings_panel_test.go.
+
 **Patterns used:**
 - HOME override to tmpDir + ClearUserConfigCache() for config isolation (matches existing Fork/BuildCommand patterns)
 - t.Setenv("PATH", "/nonexistent") for binary-not-found simulation

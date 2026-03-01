@@ -101,3 +101,12 @@ Binary: `copilot` (standalone, `brew install copilot-cli@prerelease` or `npm ins
 
 - **2026-03-01T03:23:30Z — Cross-agent (Scribe):** Lambert wrote 5 tests for `preflightCopilot()`: missing binary, custom command, binary exists, Start() error propagation, empty command default. All pass. Test file: `internal/session/instance_test.go`.
   - Clean `go build ./...` and `go vet ./...`.
+
+- **2026-03-01T04:12:00Z — Phase 6: Documentation, TUI Polish, CHANGELOG:**
+  - **README.md:** Added Copilot to Multi-Tool Support table, updated "The Problem" section.
+  - **troubleshooting.md:** Added Copilot CLI Issues section + quick fix row.
+  - **home.go:** Added Copilot session details panel (status, session ID, detected at), fixed custom tool guard to exclude "copilot".
+  - **CHANGELOG.md:** Added v0.20.0 section with Copilot feature entries.
+  - **settings_panel.go:** Fixed hardcoded index 4 → `len(toolValues)-1` for None default.
+  - **settings_panel_test.go:** Added copilot test cases, updated None index from 4→5.
+  - Ripley provided execution plan. Lambert verified tests. All green.

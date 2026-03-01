@@ -198,6 +198,37 @@ Verified Phase 5 design doc against current codebase. Key findings:
 
 **Error propagation path confirmed:** `Start()` returns error → `sessionCreatedMsg{err: err}` in UI → `h.setError(msg.err)` in home.go Update handler → displayed in TUI footer. The preflight error will surface cleanly through this existing path.
 
+### 2026-03-01 — Phase 6 Execution Plan: Documentation, Polish, Enable by Default
+
+Performed full codebase verification against all 7 Phase 6 tasks. Key findings:
+
+**Tasks already complete (no work needed):**
+- Task 2 (sample config): `[copilot]` section in `CreateExampleConfig()` has all 6 CopilotSettings fields. Perfect 1:1 match.
+- Task 6 (feature flag removal): No feature flag ever existed. Copilot was always additive (no gating). The `internal/experiments/` package is unrelated (manages `agent-deck try` folders).
+
+**Tasks needing work (5 total, all parallelizable):**
+- Task 1A: README Multi-Tool Support table missing Copilot row (line ~268)
+- Task 1B: README "The Problem" section doesn't mention Copilot (line 59)
+- Task 3: Troubleshooting section needed in `skills/agent-deck/references/troubleshooting.md` (follows existing precedent of per-tool subsections in shared doc)
+- Task 4: Session details panel in `home.go` is Claude-only (~L7835). CopilotSessionID is detected/stored but never rendered. Only functional code change in Phase 6.
+- Task 7: CHANGELOG entry for v0.20.0
+
+**Deferred:** Task 5 (experimental features `--experimental`, `--available-tools`) — optional, additive, doesn't block v1.
+
+**Key architectural insight:** Session details panel is currently Claude-specific. Adding Copilot establishes a precedent for multi-tool detail panels. Future work should consider a tool-agnostic detail renderer rather than per-tool if-blocks.
+
+**All verified integration points:**
+- `internal/tmux/patterns.go:78` — copilot busy/prompt patterns ✅
+- `internal/ui/styles.go:193,599,620` — icon (🛸) + color (#6e40c9 GitHub purple) ✅
+- `internal/session/tooloptions.go:299-400` — CopilotOptions complete (6 fields, 5 methods) ✅
+- `internal/session/userconfig.go:519-540` — CopilotSettings complete (6 fields) ✅
+- `internal/session/instance.go:100-102` — CopilotSessionID, CopilotDetectedAt, CopilotStartedAt ✅
+- `internal/ui/home.go:5151` — case "copilot" in session creation ✅
+- All UI tool lists (setup wizard, new dialog, settings panel) include copilot ✅
+- No TODOs/FIXMEs related to copilot in instance.go ✅
+
+**Execution plan written to:** `.squad/plans/phase-6-execution-plan.md`
+
 **Restart() also needs preflight:** `Restart()` at line 3607 calls `buildCopilotCommand()` at lines 3891/3908. If a user deletes the copilot binary between sessions, restart will fail cryptically. Same preflight check should guard restart.
 
 ### 2026-02-28 — Upstream Review #2 (v0.19.14 → v0.19.19, 32 commits, 180 files)
@@ -338,3 +369,10 @@ Full deep review of upstream divergence. 5 version bumps (v0.19.15–v0.19.19). 
 **Phase 4 (Status Detection) fully implemented and tested.**
 - Parker added `DefaultRawPatterns("copilot")` (BusyPatterns: "Esc to cancel" + state-icon regex, PromptPatterns: "Type @ to mention files"), tool detection order/patterns, `detectToolFromCommand` copilot case, and `CanFork` copilot case across patterns.go, tmux.go, and instance.go.
 - Lambert wrote 5 test functions (22 cases) and caught a false-positive: `\bcopilot\b` in `detectToolFromContent` matches paths containing "copilot". Coordinator resolved by replacing with state-icon regex `(?m)^[◉◐◎∙]\s`. All tmux tests pass.
+
+### 2026-03-01 — Cross-Agent Update: Phase 6 Complete
+
+**Phase 6 (Documentation, TUI Polish, CHANGELOG) fully implemented and tested.**
+- Ripley analyzed Phase 6 design doc: 2 tasks already complete (sample config, feature flag), 1 deferred (experimental features), 5 actionable. Produced execution plan at `.squad/plans/phase-6-execution-plan.md`.
+- Parker executed all 5 tasks: README multi-tool table + problem section, troubleshooting Copilot section, Copilot session details panel in home.go, CHANGELOG v0.20.0 entry. Also fixed settings_panel.go hardcoded index bug (4 → `len(toolValues)-1`).
+- Lambert updated settings_panel_test.go with Copilot entries, verified all tests pass (ui, tmux, cmd packages).
