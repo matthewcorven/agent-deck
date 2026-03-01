@@ -141,3 +141,12 @@ type StatusProvider interface {
 **Status:** Decided
 **What:** Copilot CLI's `--resume` flag accepts both workspace UUIDs and session UUIDs — both successfully restore the target session with full conversation history. However, the CLI's own exit message (`Resume this session with copilot --resume=<workspace-uuid>`) canonically recommends the **workspace UUID**. Agent Deck should use the workspace UUID as the primary resume identifier, with session UUID as an alternative. Both `--resume=UUID` and `--resume UUID` (space-separated) syntax are accepted.
 **Why:** Live resume captures (Resume_11d97e41 via workspace UUID, Resume_155f69ab via session UUID) both succeeded. Critically, when resuming by session UUID (155f69ab), the exit hint still printed the workspace UUID (11d97e41) — confirming workspace UUID as the canonical resume identifier. This aligns with our filesystem detection strategy: `workspace.yaml` already provides the workspace UUID directly, making it the natural key for resume operations. Using the canonical form also reduces the risk of breakage if session-UUID-based resume is ever deprecated.
+
+---
+
+### 2026-03-01: Copilot content detection patterns too broad — `\bcopilot\b` replaced with state-icon regex
+
+**By:** Lambert (Tester)
+**Status:** Completed (fixed by Coordinator)
+**What:** `detectToolFromContent` in tmux.go originally used `\bcopilot\b` for copilot detection, which false-positived on paths containing "copilot" as a standalone word (e.g. `/Users/test/copilot-project$`) and failed to detect copilot from its actual UI content (state icons + "Esc to cancel"). Replaced with state-icon regex `(?m)^[◉◐◎∙]\s` which matches Copilot's actual TUI state indicators at line start.
+**Why:** The Claude detection uses UI-specific patterns (`claude code`, `trust the files`, `tell Claude what to do differently`) — not bare tool names. Copilot needs the same approach: match state icon patterns rather than `\bcopilot\b`. The state icons (`◉◐◎∙`) are unique to Copilot's TUI and won't false-positive on paths or other tool output.

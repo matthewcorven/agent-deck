@@ -306,3 +306,9 @@ Full deep review of upstream divergence. 5 version bumps (v0.19.15–v0.19.19). 
 - Async detection wired into `Start()` and `StartWithMessage()`. Clean build/vet.
 - Lambert wrote 14 tests covering: query matching, time windows, multi-candidate selection, ID exclusion, unscoped queries, empty dir, corrupt YAML, missing ID, home dir resolution (default/env/config override), and 2 resume integration tests. All green.
 - The Phase 0 hard gate (filesystem session ID detection) is now fully resolved in code.
+
+### 2026-03-01 — Cross-Agent Update: Phase 4 Complete
+
+**Phase 4 (Status Detection) fully implemented and tested.**
+- Parker added `DefaultRawPatterns("copilot")` (BusyPatterns: "Esc to cancel" + state-icon regex, PromptPatterns: "Type @ to mention files"), tool detection order/patterns, `detectToolFromCommand` copilot case, and `CanFork` copilot case across patterns.go, tmux.go, and instance.go.
+- Lambert wrote 5 test functions (22 cases) and caught a false-positive: `\bcopilot\b` in `detectToolFromContent` matches paths containing "copilot". Coordinator resolved by replacing with state-icon regex `(?m)^[◉◐◎∙]\s`. All tmux tests pass.

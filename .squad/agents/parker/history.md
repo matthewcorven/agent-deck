@@ -80,3 +80,14 @@ Binary: `copilot` (standalone, `brew install copilot-cli@prerelease` or `npm ins
   - Clean `go build ./...` and `go vet ./internal/session/...`.
   - **Architecture:** workspace UUID from workspace.yaml `id` field IS the resume key stored in CopilotSessionID. buildCopilotCommand() already uses it for `--resume`. No new Instance struct fields needed.
   - **Key pattern differences from Codex:** Codex uses JSONL walking with regex UUID extraction from filenames; Copilot uses directory-based walking with YAML parsing. Codex scans date-organized dirs; Copilot scans flat UUID dirs under session-state/.
+
+- **2026-03-01T03:01:43Z — Phase 4: Status Detection (Implementation):**
+  - **P1:** Added `case "copilot"` to `DefaultRawPatterns()` in `internal/tmux/patterns.go`. BusyPatterns: "Esc to cancel" (capital E, differs from Gemini's lowercase), `re:(?m)^[◉◐◎∙]\s` (state icons). PromptPatterns: "Type @ to mention files". No SpinnerChars or WhimsicalWords (Copilot uses state icons, not cycling spinners).
+  - **P2:** Added "copilot" to `toolDetectionOrder` in `internal/tmux/tmux.go` (after codex).
+  - **P3:** Added copilot entry to `toolDetectionPatterns` map: `\bcopilot\b` and `type\s*@\s*to\s*mention`.
+  - **P4:** Added `case strings.Contains(cmdLower, "copilot")` to `detectToolFromCommand()` switch (before default).
+  - **P5:** Added copilot case to `CanFork()` in `internal/session/instance.go` — uses CopilotSessionID field with 5-minute freshness window, matching Codex/OpenCode pattern.
+  - All validation passed: `go build`, `go test ./internal/tmux/...`, `go vet`.
+
+- **2026-03-01T03:07:25Z — Cross-agent: Phase 4 tool detection pattern fix:**
+  Lambert's tests found `\bcopilot\b` in `toolDetectionPatterns` false-positives on paths containing "copilot" as standalone word. Coordinator replaced with `(?m)^[◉◐◎∙]\s` (state-icon regex). All tmux tests now pass. Decision merged to decisions.md.

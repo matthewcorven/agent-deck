@@ -101,3 +101,31 @@ The `ToolStatus` constant naming collision (T3/T4/T5 blocker) was resolved by th
 - Time window filtering uses directory mtime via `entry.Info()`, controlled in tests via `os.Chtimes`
 - `t.Setenv("COPILOT_HOME", tmpDir)` + `ClearUserConfigCache()` is the standard isolation pattern for all getCopilotHomeDir tests
 - Unscoped fallback (no cwd/git_root) is tracked separately from scoped matches — scoped always wins
+
+### 2026-03-01T03:03:14Z — Phase 4 Tests: Copilot Status Detection Patterns + Tool Detection
+
+**Tests written (5 functions, 22 cases across 2 files):**
+
+**`internal/tmux/patterns_test.go` (4 functions, 16 cases):**
+- `TestDefaultRawPatterns_Copilot` — sanity check: busy/prompt non-empty, no SpinnerChars, no WhimsicalWords (PASS)
+- `TestCopilotBusyPatterns` — 6-case table: ◉ Thinking, ◐ Running, ◐ streaming, ∙ Planning all match busy; idle prompt and shell output do NOT (PASS)
+- `TestCopilotPromptPatterns` — 4-case table: normal idle, plan mode idle match prompt; thinking and shell do NOT (PASS)
+- `TestCopilotPatternsNoCollision` — 5-case: generic shell, Claude busy, Gemini prompt, Codex prompt, OpenCode busy content must NOT trigger copilot busy patterns (PASS)
+
+**`internal/tmux/tmux_test.go` (1 function + 2 test expansions, 6 cases):**
+- `TestDetectToolFromCommand` — added 3 copilot cases: bare "copilot", "--resume abc123", full path "/usr/local/bin/copilot" (PASS)
+- `TestDetectToolFromContentCopilot` — 4-case: idle prompt → copilot, busy state → copilot, plan mode → copilot, path-containing-word → shell (2 FAIL — see blockers)
+
+**Blockers for Parker:**
+1. `detectToolFromContent` uses `\bcopilot\b` which is too broad — matches "copilot" in paths like "copilot-project" (false positive, `-` is a word boundary)
+2. `detectToolFromContent` doesn't have copilot-specific UI patterns — "◉ Thinking\nEsc to cancel" returns "shell" instead of "copilot"
+3. Fix: use copilot UI-specific patterns (like Claude does with "claude code", "trust the files") — e.g. `Type @ to mention files`, `Esc to cancel` combined with state icon regex
+
+**Patterns observed:**
+- Copilot patterns in patterns.go (DefaultRawPatterns) are correct and well-structured — state icons regex + string patterns
+- Tool detection in tmux.go needs the same specificity approach Claude uses: no bare tool name matching in content, only UI-specific signatures
+- All 4 pattern tests pass green because patterns.go copilot case is properly implemented
+
+### 2026-03-01T03:07:25Z — Cross-agent: Phase 4 tool detection fix applied
+
+Coordinator resolved the `\bcopilot\b` false-positive flagged in `TestDetectToolFromContentCopilot`. Replaced with state-icon regex `(?m)^[◉◐◎∙]\s` in `toolDetectionPatterns`. All 22 Phase 4 test cases now pass. Decision merged to decisions.md by Scribe.
