@@ -70,3 +70,34 @@ The `ToolStatus` constant naming collision (T3/T4/T5 blocker) was resolved by th
 - Pre-existing test failures are all OpenCode E2E (require running OpenCode) and conductor plist (requires agent-deck in PATH) — unrelated to Copilot work
 - `boolPtr` helper lives in `gemini_yolo_test.go` and is available package-wide
 - statedb had no `migrate_test.go` — created as new file for MarshalToolData/UnmarshalToolData round-trip coverage
+
+### 2026-03-01T02:44:40Z — Phase 3 Tests: Copilot Session Detection + Resume
+
+**Tests written (14 in `internal/session/instance_test.go`):**
+
+**queryCopilotSession (9 tests):**
+- `TestQueryCopilotSession_MatchingProject` — matching cwd returns correct workspace UUID
+- `TestQueryCopilotSession_NonMatchingProject` — different cwd returns ""
+- `TestQueryCopilotSession_TimeWindowFiltering` — workspace.yaml older than CopilotStartedAt is skipped
+- `TestQueryCopilotSession_MultipleCandidates` — two matching → most recently modified wins
+- `TestQueryCopilotSession_ExcludeIDs` — excluded session ID is skipped
+- `TestQueryCopilotSession_AllowUnscopedFallback` — no cwd/git_root → returned only when allowUnscoped=true
+- `TestQueryCopilotSession_EmptyDirectory` — no session-state dir → ""
+- `TestQueryCopilotSession_CorruptYAML` — invalid YAML skipped gracefully, no panic
+- `TestQueryCopilotSession_MissingIDField` — no id field → falls back to directory name as ID
+
+**getCopilotHomeDir (3 tests):**
+- `TestGetCopilotHomeDir_Default` — returns ~/.copilot when no overrides
+- `TestGetCopilotHomeDir_EnvOverride` — COPILOT_HOME env var takes precedence over default
+- `TestGetCopilotHomeDir_ConfigOverride` — UserConfig copilot.config_dir wins over env var (highest priority)
+
+**Resume integration (2 tests):**
+- `TestCopilotResume_WithSessionID` — CopilotSessionID set → `--resume` in command output
+- `TestCopilotResume_ContinueFallback` — no CopilotSessionID → fresh command, no `--resume`
+
+**Patterns observed:**
+- `getCopilotHomeDir()` reads config from `~/.agent-deck/config.toml` (via `GetAgentDeckDir()`), not `~/.config/agent-deck/`
+- `queryCopilotSession()` falls back to directory name as ID when `workspace.yaml` has no `id` field — important for robustness
+- Time window filtering uses directory mtime via `entry.Info()`, controlled in tests via `os.Chtimes`
+- `t.Setenv("COPILOT_HOME", tmpDir)` + `ClearUserConfigCache()` is the standard isolation pattern for all getCopilotHomeDir tests
+- Unscoped fallback (no cwd/git_root) is tracked separately from scoped matches — scoped always wins

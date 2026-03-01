@@ -298,3 +298,11 @@ Full deep review of upstream divergence. 5 version bumps (v0.19.15–v0.19.19). 
 - 6 tool list arrays found across 4 files (newdialog.go, settings_panel.go, setup_wizard.go). 2 test files also have hardcoded tool lists (Lambert's domain).
 
 **Key architectural note:** `GetToolIcon()` in userconfig.go (line 1002) and `ToolIcon()` in styles.go (line 585) are parallel implementations — both have switch cases for the same tools. Comment in styles.go explains circular import prevents delegation. Both must be updated in lockstep.
+
+### 2026-03-01 — Cross-Agent Update: Phase 3 Complete
+
+**Phase 3 (Session Detection + Resume) fully implemented and tested.**
+- Parker implemented 6 functions in `copilot.go`: `DetectCopilotSession`, `detectCopilotSessionAsync`, `getCopilotHomeDir`, `queryCopilotSession`, `collectOtherCopilotSessionIDs`, plus `UpdateCopilotSession` filesystem fallback in `instance.go`.
+- Async detection wired into `Start()` and `StartWithMessage()`. Clean build/vet.
+- Lambert wrote 14 tests covering: query matching, time windows, multi-candidate selection, ID exclusion, unscoped queries, empty dir, corrupt YAML, missing ID, home dir resolution (default/env/config override), and 2 resume integration tests. All green.
+- The Phase 0 hard gate (filesystem session ID detection) is now fully resolved in code.

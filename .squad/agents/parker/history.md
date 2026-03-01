@@ -66,3 +66,17 @@ Binary: `copilot` (standalone, `brew install copilot-cli@prerelease` or `npm ins
   - **C12:** PostStartSync — added `case "copilot"` as no-op (async detection like Codex).
   - **Additional:** hookFastPathFreshnessForTool — added copilot to the codex-style freshness check. UpdateCopilotSession() — tmux env read method (filesystem detection deferred to Phase 3). SyncSessionIDsToTmux — added COPILOT_SESSION_ID sync. UpdateStatus active/waiting tracking — added copilot to Codex-style session tracking call.
   - **Verification:** 6 `case "codex"` → 6 `case "copilot"`. Clean `go build ./...`. All dispatch points covered by grep -n cross-check.
+
+- **2026-03-01T02:39:57Z — Phase 3: Copilot Session Detection + Resume:**
+  - Implemented 6 new functions/methods in `internal/session/instance.go`:
+    1. `DetectCopilotSession()` — public wrapper for restored sessions.
+    2. `detectCopilotSessionAsync()` — retry loop (1s init sleep, 3 attempts at 0/1s/2s). On success: sets CopilotSessionID, CopilotDetectedAt, syncs to tmux env COPILOT_SESSION_ID.
+    3. `getCopilotHomeDir()` — resolves config directory: CopilotSettings.ConfigDir > COPILOT_HOME env > ~/.copilot.
+    4. `queryCopilotSession(excludeIDs, allowUnscoped)` — walks `~/.copilot/session-state/*/workspace.yaml`, YAML-unmarshal with `copilotWorkspaceYAML` struct, matches by `normalizePath(cwd)` or `normalizePath(git_root)` against ProjectPath. Filters by CopilotStartedAt, excludes other sessions' IDs. Returns best scoped match (most recent) or unscoped fallback.
+    5. `collectOtherCopilotSessionIDs()` — enumerates tmux sessions, reads COPILOT_SESSION_ID from each, returns exclusion map.
+    6. Updated `UpdateCopilotSession()` — added filesystem fallback after tmux env check: when CopilotSessionID empty and CopilotStartedAt > 0, calls queryCopilotSession(allowUnscoped=false) and syncs back to tmux env.
+  - Added `go i.detectCopilotSessionAsync()` dispatch in both `Start()` and `StartWithMessage()` (after existing Codex blocks).
+  - Added `gopkg.in/yaml.v3` import (already indirect in go.mod, now direct in instance.go).
+  - Clean `go build ./...` and `go vet ./internal/session/...`.
+  - **Architecture:** workspace UUID from workspace.yaml `id` field IS the resume key stored in CopilotSessionID. buildCopilotCommand() already uses it for `--resume`. No new Instance struct fields needed.
+  - **Key pattern differences from Codex:** Codex uses JSONL walking with regex UUID extraction from filenames; Copilot uses directory-based walking with YAML parsing. Codex scans date-organized dirs; Copilot scans flat UUID dirs under session-state/.
