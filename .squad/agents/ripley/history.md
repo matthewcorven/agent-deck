@@ -148,6 +148,23 @@ Analyzed 4 resume captures (Resume_11d97e41, Resume_155f69ab, plus ANSI variants
 - **`--resume` accepts both workspace UUID and session UUID.** Both successfully restore the target session with full conversation history. The CLI's exit message canonically recommends the workspace UUID (`Resume this session with copilot --resume=<workspace-uuid>`), even when the session was resumed by session UUID. This confirms workspace UUID as the primary resume key for Agent Deck.
 - **`--continue` confirmed working** — returns to the previous session (Matthew manual test).
 - **Welcome banner is version-unstable:** Changed from "Describe a task to get started" (v0.0.418) to "Copilot uses AI. Check for mistakes." (v0.0.420). Dropped `"Describe a task to get started"` from PromptPatterns draft. The primary `"Type @ to mention files"` pattern is confirmed stable across both versions.
+
+### 2026-02-28 — Phase 2 Design Review: Verification & Execution Plan
+
+Verified Phase 2 doc (`phase-2-command-builder.md`) against current codebase. Found 7 discrepancies requiring doc amendment before implementation:
+
+**Discrepancies found:**
+1. **Line numbers are stale.** `buildGeminiCommand` is line 535 (doc says ~470), `buildCodexCommand` is line 687 (doc says ~616), `buildOpenCodeCommand` is line 610 (doc says ~531). Start() is 1408, StartWithMessage() is 1498, Restart() is 3223.
+2. **Missing dispatch points.** Doc lists Start/StartWithMessage/Restart but omits 6 additional tool switch sites: UpdateStatus hook handling (lines 2010+2252), PostStartSync (line 2481), CanRestart (line 3629), CanFork (line 3672), and Instance restore in storage.go (line 686).
+3. **Storage path underscoped.** Doc says "~4 files" but the full storage pipeline touches: `toolDataBlob` struct, `jsonInstanceData` struct, `MarshalToolData` (positional params), `UnmarshalToolData` (positional params + return values), `InstanceData` struct in storage.go, the `MarshalToolData` call (line 257), two `UnmarshalToolData` calls (lines 404, 486), and the Instance restore mapping (line 706). That's 4 files but 10+ insertion sites.
+4. **`buildCopilotExtraFlags` is over-engineered.** The doc's version loads config twice (once for YoloMode fallback, once already done). Should follow the cleaner `buildOpenCodeExtraFlags()` pattern (single config load, options-then-fallback).
+5. **No `buildCopilotCommandWithMessage` addressed.** Claude has a separate `buildClaudeCommandWithMessage` that embeds `-p "MESSAGE"` in the command. Copilot supports `-i "PROMPT"`. Doc says "use send-keys-after-ready" but doesn't specify if `-i` should be used instead for initial messages. Decision needed.
+6. **`CopilotStartedAt` field type inconsistency.** Doc proposes `int64` (Unix millis) matching Codex/OpenCode pattern — this is correct and consistent.
+7. **Doc's `buildCopilotCommand` includes AGENTDECK env vars inline** — this matches the Codex pattern correctly.
+
+**Phase 1 verification: CopilotSettings confirmed present** in userconfig.go with all expected fields (Command, YoloMode, DefaultModel, DefaultAgent, ConfigDir, EnvFile) plus `GetCommand()` accessor.
+
+**Key pattern to follow:** OpenCode is the closest template — has model/agent flags, session resume, extra-flags helper, async session detection. Copilot should mirror it.
 - **events.jsonl structure mapped:** Event types include `session.start`, `user.message`, `assistant.turn_start/message/turn_end`, `tool.execution_start/complete`, `session.model_change`. `session.start` payload contains `sessionId`, `copilotVersion`, `context: {cwd, gitRoot, branch, repository}`. Parent-child chain via `parentId`. Valuable as an alternative/supplementary detection path to `workspace.yaml`.
 - **New observable patterns:** Exit summary block (session time, code changes, resume hint), `IDE connection lost:`, `Error auto updating:`, user-aborted ops (`✗` + `Operation aborted by user`).
 

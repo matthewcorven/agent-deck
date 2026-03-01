@@ -42,3 +42,27 @@ Binary: `copilot` (standalone, `brew install copilot-cli@prerelease` or `npm ins
   - `skills/agent-deck/references/config-reference.md` updated: TOC, full `[copilot]` section, built-in icons list, complete example.
   - **Key collision found:** `instance.go` already defines `StatusIdle`/`StatusError` as `Status` (string). Used `ToolStatusIdle`/`ToolStatusError` (int) to avoid name collision. Lambert's pre-written test file `status_provider_test.go` uses unprefixed names — needs updating by Lambert.
   - **Dual icon pattern confirmed:** `GetToolIcon()` in userconfig.go AND `ToolIcon()` in styles.go both need copilot — done in both.
+
+- **2026-03-01T02:05:16Z — Phase 2, Task A: CopilotOptions added to tooloptions.go:**
+  - `CopilotOptions` struct with 6 fields: SessionMode, ResumeSessionID, Model, Agent, YoloMode (*bool, nil=inherit), ConfigDir.
+  - `ToolName()` → "copilot", `ToArgs()` (session mode switch + all flags), `ToArgsForFork()` (omits session mode flags).
+  - `NewCopilotOptions(config)` populates from `config.Copilot.*` (YoloMode, DefaultModel, DefaultAgent, ConfigDir).
+  - `UnmarshalCopilotOptions(data)` follows exact `UnmarshalCodexOptions` pattern (ToolOptionsWrapper → tool check → unmarshal).
+  - Pattern notes: Copilot uses `--continue`/`--resume` (long flags, not `-c`/`-r` like Claude), `--yolo` (not `--dangerously-skip-permissions`), `--model`/`--agent` (long flags like OpenCode's `-m`/`--agent`).
+  - Clean compile confirmed. File: `internal/session/tooloptions.go`.
+
+- **2026-03-01T02:14:48Z — Phase 2, Task C: Instance fields, command builder, and all dispatch points:**
+  - **C1:** Added `CopilotStartedAt int64` to Instance struct (Dallas had already added CopilotSessionID/CopilotDetectedAt).
+  - **C2:** `buildCopilotCommand()` — follows buildOpenCodeCommand pattern: env prefix, AGENTDECK env vars, copilot binary from config.Copilot.GetCommand(), resume via `--resume {id}` with tmux set-environment, extra flags from buildCopilotExtraFlags.
+  - **C3:** `buildCopilotExtraFlags()` — follows buildOpenCodeExtraFlags pattern (single config load): yolo, model, agent, config-dir from GetCopilotOptions() with NewCopilotOptions fallback.
+  - **C4:** `GetCopilotOptions()` / `SetCopilotOptions()` — follows exact GetCodexOptions/SetCodexOptions pattern using UnmarshalCopilotOptions.
+  - **C5/C6:** Start() and StartWithMessage() — added `case "copilot"` dispatching to buildCopilotCommand + CopilotStartedAt timestamp.
+  - **C7:** Restart() respawn-pane block — tmux env recovery for COPILOT_SESSION_ID, resume or fresh start, respawn-pane.
+  - **C8:** Restart() fallback switch — added copilot to both the if/else-if resume chain and the fresh-start switch.
+  - **C9:** CanRestart() — copilot can always restart (with or without session ID).
+  - **C10:** UpdateStatus hook fast path — added `"copilot"` to hook freshness check and waiting-status branch.
+  - **C10b:** UpdateStatus hook session ID sync — added `case "copilot"` to update CopilotSessionID/CopilotDetectedAt from hookSessionID.
+  - **C11:** UpdateHookStatus — added `case "copilot"` for session ID sync from hook payload with tmux env sync.
+  - **C12:** PostStartSync — added `case "copilot"` as no-op (async detection like Codex).
+  - **Additional:** hookFastPathFreshnessForTool — added copilot to the codex-style freshness check. UpdateCopilotSession() — tmux env read method (filesystem detection deferred to Phase 3). SyncSessionIDsToTmux — added COPILOT_SESSION_ID sync. UpdateStatus active/waiting tracking — added copilot to Codex-style session tracking call.
+  - **Verification:** 6 `case "codex"` → 6 `case "copilot"`. Clean `go build ./...`. All dispatch points covered by grep -n cross-check.

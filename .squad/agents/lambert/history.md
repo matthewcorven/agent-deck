@@ -35,3 +35,38 @@ Agent Deck is a Go CLI/TUI tool for managing multiple AI coding agent sessions v
 
 **Source:** Coordinator (via Parker's decision)
 The `ToolStatus` constant naming collision (T3/T4/T5 blocker) was resolved by the coordinator. Constants renamed from `StatusIdle`/`StatusError`/etc to `ToolStatusIdle`/`ToolStatusError`/etc. Lambert's test file `status_provider_test.go` was updated to match. All 5 tests now pass green. Decision recorded in `.squad/decisions/decisions.md`.
+
+### 2026-02-28 — Phase 2 Tests: Copilot Command Builder, Options, and Storage
+
+**Tests written (22 across 3 files):**
+
+**`internal/session/tooloptions_test.go` (13 tests):**
+- `TestCopilotOptions_ToolName` — verifies ToolName() returns "copilot"
+- `TestCopilotOptions_ToArgs` — 11-case table-driven: empty, new, continue, resume+ID, resume-no-ID, model, agent, yolo-true, yolo-false, config-dir, all-combined
+- `TestCopilotOptions_ToArgsForFork` — 6-case table-driven: empty, session-mode-excluded, model+agent, yolo, config-dir, all-non-session-flags
+- `TestCopilotOptions_MarshalUnmarshal` — full round-trip via ToolOptionsWrapper
+- `TestNewCopilotOptions` — from config with DefaultModel, DefaultAgent, YoloMode, ConfigDir
+- `TestNewCopilotOptions_NilConfig` — nil config returns sane defaults
+- `TestUnmarshalCopilotOptions_EmptyData` — nil and empty byte slice
+- `TestUnmarshalCopilotOptions_WrongTool` — claude data returns nil for copilot unmarshal
+
+**`internal/session/instance_test.go` (5 tests):**
+- `TestBuildCopilotCommand_New` — fresh start, no session ID, verifies env vars and no --resume
+- `TestBuildCopilotCommand_Resume` — CopilotSessionID set → --resume ID + tmux set-environment
+- `TestBuildCopilotCommand_WithOptions` — model + agent + yolo + config-dir present in output
+- `TestBuildCopilotCommand_CustomCommand` — non-matching base command passes through with env prefix
+- `TestBuildCopilotCommand_NonCopilotTool` — non-copilot tool returns command unmodified
+- `TestGetSetCopilotOptions` — full round-trip via JSON, including clear-on-nil
+
+**`internal/statedb/migrate_test.go` (4 tests, NEW FILE):**
+- `TestMarshalUnmarshalToolData_CopilotFields` — round-trip with CopilotSessionID + CopilotDetectedAt, verifies other fields survive
+- `TestMarshalUnmarshalToolData_CopilotEmpty` — empty Copilot fields round-trip as zero values
+- `TestMarshalUnmarshalToolData_CopilotWithToolOptions` — Copilot fields + ToolOptions JSON survive together
+- `TestUnmarshalToolData_EmptyData` — nil data returns zero values
+
+**Patterns observed:**
+- `buildCopilotCommand` follows the same env-prefix + binary detection pattern as Gemini, but uses `tmux set-environment COPILOT_SESSION_ID` for resume (no uuidgen/capture-resume pattern like Claude)
+- `buildCopilotExtraFlags` reads from GetCopilotOptions() then falls back to config defaults — tests need SetCopilotOptions() to exercise all flags
+- Pre-existing test failures are all OpenCode E2E (require running OpenCode) and conductor plist (requires agent-deck in PATH) — unrelated to Copilot work
+- `boolPtr` helper lives in `gemini_yolo_test.go` and is available package-wide
+- statedb had no `migrate_test.go` — created as new file for MarshalToolData/UnmarshalToolData round-trip coverage
