@@ -23,6 +23,7 @@ import (
 	"github.com/asheshgoplani/agent-deck/internal/docker"
 	"github.com/asheshgoplani/agent-deck/internal/logging"
 	"github.com/asheshgoplani/agent-deck/internal/tmux"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -1030,6 +1031,220 @@ func (i *Instance) detectCodexSessionAsync() {
 	sessionLog.Warn("codex_detection_failed", slog.Int("attempts", len(delays)))
 }
 
+// DetectCopilotSession is the public wrapper for async Copilot session detection
+// Call this for restored sessions that don't have a session ID yet
+func (i *Instance) DetectCopilotSession() {
+	i.detectCopilotSessionAsync()
+}
+
+// detectCopilotSessionAsync detects the Copilot session ID after startup
+// Copilot stores workspace state in ~/.copilot/session-state/{uuid}/workspace.yaml
+// The workspace UUID is the resume key passed via --resume
+func (i *Instance) detectCopilotSessionAsync() {
+	// Brief wait for Copilot to initialize
+	time.Sleep(1 * time.Second)
+
+	// Try up to 3 times with short delays
+	delays := []time.Duration{0, 1 * time.Second, 2 * time.Second}
+
+	for attempt, delay := range delays {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+
+		sessionID := i.queryCopilotSession(i.collectOtherCopilotSessionIDs(), true)
+		if sessionID != "" {
+			i.CopilotSessionID = sessionID
+			i.CopilotDetectedAt = time.Now()
+
+			// Store in tmux environment for restart
+			if i.tmuxSession != nil {
+				if err := i.tmuxSession.SetEnvironment("COPILOT_SESSION_ID", sessionID); err != nil {
+					sessionLog.Warn("copilot_set_env_failed", slog.String("error", err.Error()))
+				}
+			}
+
+			sessionLog.Debug(
+				"copilot_session_detected",
+				slog.String("session_id", sessionID),
+				slog.Int("attempt", attempt+1),
+			)
+			return
+		}
+
+		sessionLog.Debug("copilot_session_not_found", slog.Int("attempt", attempt+1), slog.Int("total", len(delays)))
+	}
+
+	sessionLog.Warn("copilot_detection_failed", slog.Int("attempts", len(delays)))
+}
+
+// getCopilotHomeDir returns the Copilot config directory.
+// Priority: user config ConfigDir > COPILOT_HOME env > ~/.copilot
+func getCopilotHomeDir() string {
+	// Check user config first
+	if config, err := LoadUserConfig(); err == nil && config != nil {
+		if dir := strings.TrimSpace(config.Copilot.ConfigDir); dir != "" {
+			return dir
+		}
+	}
+
+	if copilotHome := strings.TrimSpace(os.Getenv("COPILOT_HOME")); copilotHome != "" {
+		return copilotHome
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), ".copilot")
+	}
+	return filepath.Join(home, ".copilot")
+}
+
+// copilotWorkspaceYAML represents the structure of a Copilot workspace.yaml file
+type copilotWorkspaceYAML struct {
+	ID         string `yaml:"id"`
+	CWD        string `yaml:"cwd"`
+	GitRoot    string `yaml:"git_root"`
+	Repository string `yaml:"repository"`
+	Branch     string `yaml:"branch"`
+}
+
+// queryCopilotSession scans Copilot session-state directories and returns the best candidate.
+// Selection strategy:
+//  1. Prefer sessions whose workspace.yaml cwd/git_root matches this instance's project path.
+//  2. Optionally allow unscoped fallback (no cwd/git_root metadata) for initial bootstrap.
+func (i *Instance) queryCopilotSession(excludeIDs map[string]bool, allowUnscoped bool) string {
+	sessionStateDir := filepath.Join(getCopilotHomeDir(), "session-state")
+	if _, err := os.Stat(sessionStateDir); os.IsNotExist(err) {
+		return ""
+	}
+
+	var bestScopedID string
+	var bestScopedTime time.Time
+	var bestUnscopedID string
+	var bestUnscopedTime time.Time
+
+	normalizedProjectPath := normalizePath(i.ProjectPath)
+
+	entries, err := os.ReadDir(sessionStateDir)
+	if err != nil {
+		sessionLog.Debug("copilot_scan_error", slog.String("error", err.Error()))
+		return ""
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		workspacePath := filepath.Join(sessionStateDir, entry.Name(), "workspace.yaml")
+		data, err := os.ReadFile(workspacePath)
+		if err != nil {
+			continue // No workspace.yaml in this directory
+		}
+
+		var ws copilotWorkspaceYAML
+		if err := yaml.Unmarshal(data, &ws); err != nil {
+			sessionLog.Debug("copilot_yaml_parse_error",
+				slog.String("path", workspacePath),
+				slog.String("error", err.Error()),
+			)
+			continue
+		}
+
+		// Use the id field from workspace.yaml as the session ID (resume key)
+		sessionID := ws.ID
+		if sessionID == "" {
+			// Fall back to directory name as ID
+			sessionID = entry.Name()
+		}
+
+		if excludeIDs != nil && excludeIDs[sessionID] {
+			continue
+		}
+
+		// Check directory modification time for recency
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		// Skip directories modified before we started this Copilot instance
+		if i.CopilotStartedAt > 0 {
+			startTime := time.UnixMilli(i.CopilotStartedAt)
+			if info.ModTime().Before(startTime) {
+				continue
+			}
+		}
+
+		// Check if cwd or git_root matches our project path
+		hasMetadata := ws.CWD != "" || ws.GitRoot != ""
+		matchesProject := false
+		if ws.CWD != "" && normalizePath(ws.CWD) == normalizedProjectPath {
+			matchesProject = true
+		}
+		if !matchesProject && ws.GitRoot != "" && normalizePath(ws.GitRoot) == normalizedProjectPath {
+			matchesProject = true
+		}
+
+		if matchesProject {
+			if bestScopedID == "" || info.ModTime().After(bestScopedTime) {
+				bestScopedID = sessionID
+				bestScopedTime = info.ModTime()
+			}
+			continue
+		}
+
+		// Has metadata but wrong project — skip
+		if hasMetadata {
+			continue
+		}
+
+		// No metadata — track as unscoped fallback
+		if bestUnscopedID == "" || info.ModTime().After(bestUnscopedTime) {
+			bestUnscopedID = sessionID
+			bestUnscopedTime = info.ModTime()
+		}
+	}
+
+	if bestScopedID != "" {
+		sessionLog.Debug("copilot_best_match", slog.String("session_id", bestScopedID), slog.Time("modified", bestScopedTime))
+		return bestScopedID
+	}
+	if allowUnscoped && bestUnscopedID != "" {
+		sessionLog.Debug("copilot_unscoped_match", slog.String("session_id", bestUnscopedID), slog.Time("modified", bestUnscopedTime))
+		return bestUnscopedID
+	}
+	return ""
+}
+
+// collectOtherCopilotSessionIDs enumerates other managed tmux sessions and returns
+// the COPILOT_SESSION_ID values they currently own.
+func (i *Instance) collectOtherCopilotSessionIDs() map[string]bool {
+	exclude := make(map[string]bool)
+
+	tmuxSessions, err := tmux.ListAgentDeckSessions()
+	if err != nil {
+		return exclude
+	}
+
+	myTmuxName := ""
+	if i.tmuxSession != nil {
+		myTmuxName = i.tmuxSession.Name
+	}
+
+	for _, sessName := range tmuxSessions {
+		if sessName == myTmuxName {
+			continue
+		}
+		other := &tmux.Session{Name: sessName}
+		if id, err := other.GetEnvironment("COPILOT_SESSION_ID"); err == nil && id != "" {
+			exclude[id] = true
+		}
+	}
+
+	return exclude
+}
+
 func getCodexHomeDir() string {
 	if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
 		return codexHome
@@ -1307,16 +1522,20 @@ func (i *Instance) UpdateCodexSession(excludeIDs map[string]bool) {
 	}
 }
 
-// UpdateCopilotSession updates the Copilot session ID from tmux environment.
-// Filesystem-based session ID discovery is deferred to Phase 3.
+// UpdateCopilotSession updates the Copilot session ID.
+// Primary source: tmux environment.
+// Fallback: project-aware filesystem scan of ~/.copilot/session-state/.
 func (i *Instance) UpdateCopilotSession() {
 	if i.Tool != "copilot" {
 		return
 	}
 
-	// Try to read from tmux environment (authoritative if set)
+	envSessionID := ""
+
+	// 1. Try to read from tmux environment first (authoritative if set)
 	if i.tmuxSession != nil {
 		if sessionID, err := i.tmuxSession.GetEnvironment("COPILOT_SESSION_ID"); err == nil && sessionID != "" {
+			envSessionID = sessionID
 			if i.CopilotSessionID != sessionID {
 				sessionLog.Debug(
 					"copilot_session_update",
@@ -1326,6 +1545,27 @@ func (i *Instance) UpdateCopilotSession() {
 				i.CopilotSessionID = sessionID
 			}
 			i.CopilotDetectedAt = time.Now()
+		}
+	}
+
+	// 2. Filesystem fallback: detect session from workspace.yaml if tmux env is empty
+	if i.CopilotSessionID == "" && i.CopilotStartedAt > 0 {
+		if sessionID := i.queryCopilotSession(i.collectOtherCopilotSessionIDs(), false); sessionID != "" {
+			changed := sessionID != i.CopilotSessionID
+			if changed {
+				sessionLog.Debug(
+					"copilot_session_fs_detected",
+					slog.String("old_id", i.CopilotSessionID),
+					slog.String("new_id", sessionID),
+				)
+			}
+			i.CopilotSessionID = sessionID
+			i.CopilotDetectedAt = time.Now()
+
+			// Sync back to tmux environment for future restarts
+			if i.tmuxSession != nil && i.tmuxSession.Exists() && (changed || envSessionID == "") {
+				_ = i.tmuxSession.SetEnvironment("COPILOT_SESSION_ID", i.CopilotSessionID)
+			}
 		}
 	}
 }
@@ -1588,6 +1828,11 @@ func (i *Instance) Start() error {
 		go i.detectCodexSessionAsync()
 	}
 
+	// Start async session ID detection for Copilot
+	if i.Tool == "copilot" {
+		go i.detectCopilotSessionAsync()
+	}
+
 	return nil
 }
 
@@ -1670,6 +1915,9 @@ func (i *Instance) StartWithMessage(message string) error {
 	}
 	if i.Tool == "codex" {
 		go i.detectCodexSessionAsync()
+	}
+	if i.Tool == "copilot" {
+		go i.detectCopilotSessionAsync()
 	}
 
 	// Send message synchronously (CLI will wait)

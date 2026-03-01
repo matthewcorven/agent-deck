@@ -2716,3 +2716,333 @@ func TestGetSetCopilotOptions(t *testing.T) {
 		t.Errorf("expected nil after clearing, got %+v", opts)
 	}
 }
+
+// === Phase 3: Copilot Session Detection Tests ===
+
+// createTempWorkspaceYAML creates a fake ~/.copilot/session-state/{uuid}/workspace.yaml
+// and returns the session-state directory.
+func createTempWorkspaceYAML(t *testing.T, baseDir, uuid, cwd, gitRoot string) string {
+	t.Helper()
+	dir := filepath.Join(baseDir, "session-state", uuid)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("failed to create dir %s: %v", dir, err)
+	}
+	yaml := fmt.Sprintf("id: %s\ncwd: %s\ngit_root: %s\nrepository: test/repo\nbranch: main\n", uuid, cwd, gitRoot)
+	if err := os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatalf("failed to write workspace.yaml: %v", err)
+	}
+	return dir
+}
+
+func TestQueryCopilotSession_MatchingProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir()) // isolate from real config
+	ClearUserConfigCache()
+
+	projectPath := "/tmp/my-project"
+	createTempWorkspaceYAML(t, tmpDir, "uuid-match-1", projectPath, "/tmp/my-project")
+
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      projectPath,
+		CopilotStartedAt: 0, // no time filter
+	}
+
+	result := inst.queryCopilotSession(nil, false)
+	if result != "uuid-match-1" {
+		t.Errorf("expected 'uuid-match-1', got %q", result)
+	}
+}
+
+func TestQueryCopilotSession_NonMatchingProject(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	createTempWorkspaceYAML(t, tmpDir, "uuid-other", "/tmp/other-project", "/tmp/other-project")
+
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      "/tmp/my-project",
+		CopilotStartedAt: 0,
+	}
+
+	result := inst.queryCopilotSession(nil, false)
+	if result != "" {
+		t.Errorf("expected empty string for non-matching project, got %q", result)
+	}
+}
+
+func TestQueryCopilotSession_TimeWindowFiltering(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	projectPath := "/tmp/my-project"
+	dir := createTempWorkspaceYAML(t, tmpDir, "uuid-old", projectPath, projectPath)
+
+	// Set the directory mtime to the past
+	oldTime := time.Now().Add(-1 * time.Hour)
+	os.Chtimes(dir, oldTime, oldTime)
+
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      projectPath,
+		CopilotStartedAt: time.Now().UnixMilli(), // started "now" — the old dir should be skipped
+	}
+
+	result := inst.queryCopilotSession(nil, false)
+	if result != "" {
+		t.Errorf("expected empty string for old workspace.yaml, got %q", result)
+	}
+}
+
+func TestQueryCopilotSession_MultipleCandidates(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	projectPath := "/tmp/my-project"
+
+	// Create older candidate
+	dir1 := createTempWorkspaceYAML(t, tmpDir, "uuid-older", projectPath, projectPath)
+	olderTime := time.Now().Add(-10 * time.Minute)
+	os.Chtimes(dir1, olderTime, olderTime)
+
+	// Create newer candidate
+	dir2 := createTempWorkspaceYAML(t, tmpDir, "uuid-newer", projectPath, projectPath)
+	newerTime := time.Now().Add(-1 * time.Minute)
+	os.Chtimes(dir2, newerTime, newerTime)
+
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      projectPath,
+		CopilotStartedAt: 0, // no time filter
+	}
+
+	result := inst.queryCopilotSession(nil, false)
+	if result != "uuid-newer" {
+		t.Errorf("expected most recent 'uuid-newer', got %q", result)
+	}
+}
+
+func TestQueryCopilotSession_ExcludeIDs(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	projectPath := "/tmp/my-project"
+	createTempWorkspaceYAML(t, tmpDir, "uuid-excluded", projectPath, projectPath)
+
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      projectPath,
+		CopilotStartedAt: 0,
+	}
+
+	exclude := map[string]bool{"uuid-excluded": true}
+	result := inst.queryCopilotSession(exclude, false)
+	if result != "" {
+		t.Errorf("expected empty string when ID is excluded, got %q", result)
+	}
+}
+
+func TestQueryCopilotSession_AllowUnscopedFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	// Create workspace.yaml with NO cwd or git_root (unscoped)
+	dir := filepath.Join(tmpDir, "session-state", "uuid-unscoped")
+	os.MkdirAll(dir, 0755)
+	yamlContent := "id: uuid-unscoped\nrepository: test/repo\nbranch: main\n"
+	os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte(yamlContent), 0644)
+
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      "/tmp/my-project",
+		CopilotStartedAt: 0,
+	}
+
+	// Without allowUnscoped — should NOT match
+	result := inst.queryCopilotSession(nil, false)
+	if result != "" {
+		t.Errorf("expected empty string with allowUnscoped=false, got %q", result)
+	}
+
+	// With allowUnscoped — should match
+	result = inst.queryCopilotSession(nil, true)
+	if result != "uuid-unscoped" {
+		t.Errorf("expected 'uuid-unscoped' with allowUnscoped=true, got %q", result)
+	}
+}
+
+func TestQueryCopilotSession_EmptyDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	// No session-state dir at all
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      "/tmp/my-project",
+		CopilotStartedAt: 0,
+	}
+
+	result := inst.queryCopilotSession(nil, true)
+	if result != "" {
+		t.Errorf("expected empty string for missing session-state dir, got %q", result)
+	}
+}
+
+func TestQueryCopilotSession_CorruptYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	// Write invalid YAML
+	dir := filepath.Join(tmpDir, "session-state", "uuid-corrupt")
+	os.MkdirAll(dir, 0755)
+	os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte(":::not valid yaml{{{"), 0644)
+
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      "/tmp/my-project",
+		CopilotStartedAt: 0,
+	}
+
+	// Should not panic or error — just skip
+	result := inst.queryCopilotSession(nil, true)
+	if result != "" {
+		t.Errorf("expected empty string for corrupt YAML, got %q", result)
+	}
+}
+
+func TestQueryCopilotSession_MissingIDField(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	// workspace.yaml with matching cwd but no id field → falls back to dir name
+	dir := filepath.Join(tmpDir, "session-state", "dir-name-fallback")
+	os.MkdirAll(dir, 0755)
+	yamlContent := "cwd: /tmp/my-project\ngit_root: /tmp/my-project\nrepository: test/repo\n"
+	os.WriteFile(filepath.Join(dir, "workspace.yaml"), []byte(yamlContent), 0644)
+
+	inst := &Instance{
+		Tool:             "copilot",
+		ProjectPath:      "/tmp/my-project",
+		CopilotStartedAt: 0,
+	}
+
+	result := inst.queryCopilotSession(nil, false)
+	// Falls back to directory name as ID
+	if result != "dir-name-fallback" {
+		t.Errorf("expected dir name fallback 'dir-name-fallback', got %q", result)
+	}
+}
+
+// === getCopilotHomeDir Tests ===
+
+func TestGetCopilotHomeDir_Default(t *testing.T) {
+	// Clear any overrides
+	t.Setenv("COPILOT_HOME", "")
+	t.Setenv("HOME", t.TempDir()) // isolate from real config
+	ClearUserConfigCache()
+
+	result := getCopilotHomeDir()
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, ".copilot")
+	if result != expected {
+		t.Errorf("expected default %q, got %q", expected, result)
+	}
+}
+
+func TestGetCopilotHomeDir_EnvOverride(t *testing.T) {
+	customDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", customDir)
+	t.Setenv("HOME", t.TempDir()) // isolate from real config
+	ClearUserConfigCache()
+
+	result := getCopilotHomeDir()
+	if result != customDir {
+		t.Errorf("expected COPILOT_HOME override %q, got %q", customDir, result)
+	}
+}
+
+func TestGetCopilotHomeDir_ConfigOverride(t *testing.T) {
+	configDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", "") // env var should be ignored when config is set
+	t.Setenv("HOME", homeDir)
+	ClearUserConfigCache()
+
+	// Write a TOML config with copilot.config_dir set
+	// Config lives at ~/.agent-deck/config.toml
+	cfgDir := filepath.Join(homeDir, ".agent-deck")
+	os.MkdirAll(cfgDir, 0755)
+	tomlContent := fmt.Sprintf("[copilot]\nconfig_dir = %q\n", configDir)
+	os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(tomlContent), 0644)
+
+	result := getCopilotHomeDir()
+	if result != configDir {
+		t.Errorf("expected config override %q, got %q", configDir, result)
+	}
+}
+
+// === Copilot Resume Integration Tests ===
+
+func TestCopilotResume_WithSessionID(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	inst := NewInstanceWithTool("test", "/tmp/test", "copilot")
+	inst.CopilotSessionID = "ws-uuid-12345"
+
+	cmd := inst.buildCopilotCommand("copilot")
+
+	if !strings.Contains(cmd, "--resume ws-uuid-12345") {
+		t.Errorf("expected --resume ws-uuid-12345 in command, got: %s", cmd)
+	}
+	// Should also set tmux environment for the session ID
+	if !strings.Contains(cmd, "COPILOT_SESSION_ID ws-uuid-12345") {
+		t.Errorf("expected COPILOT_SESSION_ID in tmux env, got: %s", cmd)
+	}
+}
+
+func TestCopilotResume_ContinueFallback(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	inst := NewInstanceWithTool("test", "/tmp/test", "copilot")
+	// No CopilotSessionID set — should produce a fresh command without --resume
+
+	cmd := inst.buildCopilotCommand("copilot")
+
+	if strings.Contains(cmd, "--resume") {
+		t.Errorf("fresh session should NOT have --resume, got: %s", cmd)
+	}
+	// Should still contain the copilot binary
+	if !strings.Contains(cmd, "copilot") {
+		t.Errorf("expected command to contain 'copilot', got: %s", cmd)
+	}
+}
