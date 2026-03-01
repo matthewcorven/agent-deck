@@ -5,6 +5,63 @@ All notable changes to Agent Deck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.19] - 2026-02-26
+
+### Fixed
+
+- Make Homebrew update installs resilient to stale local tap metadata by running `brew update` before `brew upgrade` in `agent-deck update`.
+- Update Homebrew check/install guidance to show the full install command (`brew update && brew upgrade asheshgoplani/tap/agent-deck`) so users can copy-paste a working path directly.
+
+## [0.19.18] - 2026-02-26
+
+### Fixed
+
+- Make `agent-deck update` Homebrew-aware end-to-end: `--check` now shows the correct `brew upgrade` command and interactive install can execute the Homebrew upgrade path directly instead of failing after confirmation.
+- Harden conductor/daemon binary resolution to prefer the active executable path and robust PATH ordering, avoiding stale `/usr/local/bin` picks that could drop parent transition notifications.
+- Prevent TUI freezes during create/fork worktree flows by moving worktree creation into async command execution instead of blocking the Enter key handler.
+- Enforce Claude conversation ID deduplication on storage saves (CLI + TUI paths) so duplicate `claude_session_id` ownership does not persist, with deterministic older-session retention.
+
+### Changed
+
+- Add conductor permission-loop troubleshooting guidance (`allow_dangerous_mode` / `dangerous_mode`) in README and troubleshooting docs.
+
+## [0.19.17] - 2026-02-26
+
+### Added
+
+- Add Docker sandbox mode for sessions (TUI + CLI), including per-session containers, hardened container defaults, and sandbox docs/config references.
+
+### Fixed
+
+- Preserve non-sandbox tmux startup behavior while keeping sandbox dead-pane restart support.
+- Strengthen `session send --no-wait` / launch no-wait initial-message delivery with retry+verification to reduce dropped prompt submits.
+- Route transition notifications through explicit parent linkage only (no conductor fallback), and align conductor/README guidance with parent-linked routing.
+
+## [0.19.16] - 2026-02-26
+
+### Fixed
+
+- Restore OpenCode/Codex status detection for active output by matching both `status_details` and `status` fields in tmux JSON pane formats.
+- Eliminate a worktree creation TOCTOU race in `add` by creating/checking candidate worktree paths in one flow and retrying with suffixed names when collisions happen.
+- Avoid false Claude tool detection for shell wrappers by validating shell executables exactly and only classifying wrappers as Claude when `claude` appears as a command token.
+- Resolve duplicate group-name move failures in the TUI by moving sessions using canonical group paths while preserving user-facing group labels.
+
+## [0.19.15] - 2026-02-25
+
+### Added
+
+- Add soft-select path editing and filterable recent-path suggestions in the New Session dialog, including matching-count hints and focused keyboard help text.
+- Add compact notifications mode (`[notifications].minimal = true`) with status icon/count summary in tmux status-left, including `starting` sessions in the active count.
+- Add conductor heartbeat rules externalization via `HEARTBEAT_RULES.md` (global default plus per-profile override support in the bridge runtime).
+- Add proactive conductor context management with `clear_on_compact` controls (`conductor setup --no-clear-on-compact` and per-conductor metadata) and synchronous `PreCompact` hook registration.
+
+### Fixed
+
+- Preserve ANSI color/styling in session preview rendering while keeping status/readiness parsing reliable by normalizing ANSI where plain-text matching is required.
+- Restore original tmux `status-left` correctly when clearing notifications, including intentionally empty original values.
+- Guard analytics cache map access across UI and background worker paths to avoid concurrent map read/write races during background status updates.
+- Prevent self-update prompts/flows on Homebrew-managed installs.
+
 ## [0.19.14] - 2026-02-24
 
 ### Added

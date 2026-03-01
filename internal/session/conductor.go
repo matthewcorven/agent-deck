@@ -3,11 +3,11 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -72,6 +72,42 @@ type ConductorMeta struct {
 	HeartbeatInterval int    `json:"heartbeat_interval"` // 0 = use global default
 	Description       string `json:"description,omitempty"`
 	CreatedAt         string `json:"created_at"`
+
+	// ClearOnCompact blocks Claude's auto-compaction and sends /clear instead.
+	// When context fills up (~95%), Claude normally summarizes prior conversation (lossy).
+	// With this enabled, agent-deck blocks compaction and clears context entirely,
+	// relying on CLAUDE.md and conductor state for continuity.
+	// Default: true (nil = use default true via GetClearOnCompact)
+	ClearOnCompact *bool `json:"clear_on_compact,omitempty"`
+}
+
+// GetClearOnCompact returns whether to block compaction and send /clear instead, defaulting to true
+func (m *ConductorMeta) GetClearOnCompact() bool {
+	if m.ClearOnCompact == nil {
+		return true
+	}
+	return *m.ClearOnCompact
+}
+
+// ConductorClearOnCompact checks if this conductor instance has clear_on_compact enabled.
+// Extracts the conductor name from the session title ("conductor-{NAME}"),
+// loads meta.json, and returns the setting (defaults to true).
+// Returns false if the title doesn't match conductor format, since the caller
+// should not enable clear-on-compact for non-conductor sessions.
+func (i *Instance) ConductorClearOnCompact() bool {
+	name := strings.TrimPrefix(i.Title, "conductor-")
+	if name == "" || name == i.Title {
+		return false // not a conductor-prefixed title: don't enable
+	}
+	meta, err := LoadConductorMeta(name)
+	if err != nil {
+		sessionLog.Warn("conductor_meta_load_failed",
+			slog.String("conductor", name),
+			slog.String("error", err.Error()),
+			slog.String("fallback", "clear_on_compact=true"))
+		return true // can't load meta: enable by default
+	}
+	return meta.GetClearOnCompact()
 }
 
 // conductorNameRegex validates conductor names: starts with alphanumeric, then alphanumeric/._-
@@ -280,7 +316,7 @@ func matchesTemplateContent(actual, expected string) bool {
 // If customClaudeMD is provided, creates a symlink instead of writing the template.
 // If customPolicyMD is provided, creates a per-conductor POLICY.md symlink (overrides the shared POLICY.md).
 // It does NOT register the session (that's done by the CLI handler which has access to storage).
-func SetupConductor(name, profile string, heartbeatEnabled bool, description string, customClaudeMD string, customPolicyMD string) error {
+func SetupConductor(name, profile string, heartbeatEnabled bool, clearOnCompact bool, description string, customClaudeMD string, customPolicyMD string) error {
 	if err := ValidateConductorName(name); err != nil {
 		return err
 	}
@@ -331,6 +367,9 @@ func SetupConductor(name, profile string, heartbeatEnabled bool, description str
 		HeartbeatEnabled: heartbeatEnabled,
 		Description:      description,
 		CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+	}
+	if !clearOnCompact {
+		meta.ClearOnCompact = &clearOnCompact
 	}
 	if err := SaveConductorMeta(meta); err != nil {
 		return fmt.Errorf("failed to write meta.json: %w", err)
@@ -426,22 +465,85 @@ func RemoveHeartbeatPlist(name string) error {
 
 // findAgentDeck looks for agent-deck in common locations
 func findAgentDeck() string {
+	if p := agentDeckPathFromArg0(); p != "" {
+		return p
+	}
+
+	if p, err := exec.LookPath("agent-deck"); err == nil {
+		if normalized := normalizeExecutablePath(p); isExecutablePath(normalized) {
+			return normalized
+		}
+	}
+
 	paths := []string{
-		"/usr/local/bin/agent-deck",
 		"/opt/homebrew/bin/agent-deck",
+		"/usr/local/bin/agent-deck",
 	}
 	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
+		if isExecutablePath(p) {
 			return p
 		}
 	}
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		p := filepath.Join(dir, "agent-deck")
-		if _, err := os.Stat(p); err == nil {
+		if isExecutablePath(p) {
 			return p
 		}
 	}
 	return ""
+}
+
+func agentDeckPathFromArg0() string {
+	arg0 := strings.TrimSpace(os.Args[0])
+	if arg0 == "" {
+		return ""
+	}
+
+	var candidate string
+	if strings.ContainsRune(arg0, os.PathSeparator) {
+		candidate = arg0
+	} else if p, err := exec.LookPath(arg0); err == nil {
+		candidate = p
+	}
+
+	candidate = normalizeExecutablePath(candidate)
+	if candidate == "" {
+		return ""
+	}
+	// Ignore go test binaries when running unit tests.
+	if strings.HasSuffix(strings.ToLower(filepath.Base(candidate)), ".test") {
+		return ""
+	}
+	if !isExecutablePath(candidate) {
+		return ""
+	}
+	return candidate
+}
+
+func normalizeExecutablePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return ""
+		}
+		path = abs
+	}
+	return filepath.Clean(path)
+}
+
+func isExecutablePath(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return true
 }
 
 // buildDaemonPath returns a PATH string suitable for daemon environments.
@@ -449,16 +551,33 @@ func findAgentDeck() string {
 // processes (launchd, systemd) that don't inherit the user's shell PATH can
 // still find the agent-deck binary.
 func buildDaemonPath(agentDeckPath string) string {
-	base := "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-	if agentDeckPath == "" {
-		return base
+	baseEntries := []string{"/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"}
+	ordered := make([]string, 0, len(baseEntries)+1)
+	seen := map[string]struct{}{}
+
+	appendUnique := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		if _, ok := seen[dir]; ok {
+			return
+		}
+		seen[dir] = struct{}{}
+		ordered = append(ordered, dir)
 	}
-	dir := filepath.Dir(agentDeckPath)
-	// Avoid duplicating a directory already in base
-	if slices.Contains(strings.Split(base, ":"), dir) {
-		return base
+
+	if normalized := normalizeExecutablePath(agentDeckPath); normalized != "" {
+		appendUnique(filepath.Dir(normalized))
 	}
-	return dir + ":" + base
+	for _, dir := range baseEntries {
+		appendUnique(dir)
+	}
+
+	if len(ordered) == 0 {
+		return ""
+	}
+	return strings.Join(ordered, ":")
 }
 
 // conductorHeartbeatScript is the shell script that sends a heartbeat to a conductor session
@@ -520,7 +639,7 @@ const conductorHeartbeatPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 // SetupConductorProfile creates the conductor directory and CLAUDE.md for a profile.
 // Deprecated: Use SetupConductor instead. Kept for backward compatibility.
 func SetupConductorProfile(profile string) error {
-	return SetupConductor(profile, profile, true, "", "", "")
+	return SetupConductor(profile, profile, true, true, "", "", "")
 }
 
 // createSymlinkWithExpansion creates a symlink from target to source, with ~ expansion and validation.

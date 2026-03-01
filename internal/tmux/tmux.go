@@ -18,13 +18,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/asheshgoplani/agent-deck/internal/logging"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/asheshgoplani/agent-deck/internal/logging"
 )
 
-var statusLog = logging.ForComponent(logging.CompStatus)
-var respawnLog = logging.ForComponent(logging.CompSession)
-var mcpLog = logging.ForComponent(logging.CompMCP)
+var (
+	statusLog  = logging.ForComponent(logging.CompStatus)
+	respawnLog = logging.ForComponent(logging.CompSession)
+	mcpLog     = logging.ForComponent(logging.CompMCP)
+)
 
 // ErrCaptureTimeout is returned when CapturePane exceeds its timeout.
 // Callers should preserve previous state rather than transitioning to error/inactive.
@@ -320,10 +323,14 @@ func SupportsHyperlinks() bool {
 }
 
 // Tool detection patterns (used by DetectTool for initial tool identification)
+var toolDetectionOrder = []string{"claude", "gemini", "opencode", "codex"}
+
 var toolDetectionPatterns = map[string][]*regexp.Regexp{
 	"claude": {
-		regexp.MustCompile(`(?i)claude`),
-		regexp.MustCompile(`(?i)anthropic`),
+		// Avoid matching bare words like "claude-deck" in shell prompts/paths.
+		regexp.MustCompile(`(?i)\bclaude\s+code\b`),
+		regexp.MustCompile(`(?i)\bno,\s*and\s*tell\s+claude\s+what\s+to\s+do\s+differently\b`),
+		regexp.MustCompile(`(?i)\bdo you trust the files in this folder\??`),
 	},
 	"gemini": {
 		regexp.MustCompile(`(?i)gemini`),
@@ -337,6 +344,37 @@ var toolDetectionPatterns = map[string][]*regexp.Regexp{
 		regexp.MustCompile(`(?i)codex`),
 		regexp.MustCompile(`(?i)openai`),
 	},
+}
+
+func detectToolFromCommand(command string) string {
+	cmdLower := strings.ToLower(strings.TrimSpace(command))
+	switch {
+	case strings.Contains(cmdLower, "claude"):
+		return "claude"
+	case strings.Contains(cmdLower, "gemini"):
+		return "gemini"
+	case strings.Contains(cmdLower, "opencode") || strings.Contains(cmdLower, "open code") || strings.Contains(cmdLower, "open-code"):
+		return "opencode"
+	case strings.Contains(cmdLower, "codex"):
+		return "codex"
+	default:
+		return ""
+	}
+}
+
+func detectToolFromContent(cleanContent string) string {
+	for _, tool := range toolDetectionOrder {
+		patterns, ok := toolDetectionPatterns[tool]
+		if !ok {
+			continue
+		}
+		for _, pattern := range patterns {
+			if pattern.MatchString(cleanContent) {
+				return tool
+			}
+		}
+	}
+	return "shell"
 }
 
 // StateTracker tracks content changes for notification-style status detection
@@ -478,6 +516,11 @@ type Session struct {
 	// Keys are tmux option names, values are their settings.
 	// Example: {"allow-passthrough": "all", "history-limit": "50000"}
 	OptionOverrides map[string]string
+
+	// RunCommandAsInitialProcess launches Start(command) as the pane's initial
+	// process instead of sending it via SendKeysAndEnter after session creation.
+	// Sandbox sessions enable this so pane-dead detection can restart exited tools.
+	RunCommandAsInitialProcess bool
 
 	// Custom patterns for generic tool support
 	customToolName       string
@@ -862,7 +905,10 @@ func sanitizeName(name string) string {
 	return re.ReplaceAllString(name, "-")
 }
 
-// Start creates and starts a tmux session
+// Start creates and starts a tmux session.
+// By default, command is sent after session creation (legacy behavior).
+// When RunCommandAsInitialProcess is true, command is passed directly to tmux
+// new-session and becomes the pane's initial process.
 func (s *Session) Start(command string) error {
 	s.Command = command
 	s.invalidateCache()
@@ -888,8 +934,15 @@ func (s *Session) Start(command string) error {
 		workDir = os.Getenv("HOME")
 	}
 
-	// Create new tmux session in detached mode
-	cmd := exec.Command("tmux", "new-session", "-d", "-s", s.Name, "-c", workDir)
+	// Create new tmux session in detached mode.
+	// Sandbox sessions launch command as the pane process for dead-pane restart.
+	// Non-sandbox sessions keep the legacy shell+send flow.
+	startWithInitialProcess := command != "" && s.RunCommandAsInitialProcess
+	args := []string{"new-session", "-d", "-s", s.Name, "-c", workDir}
+	if startWithInitialProcess {
+		args = append(args, command)
+	}
+	cmd := exec.Command("tmux", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create tmux session: %w (output: %s)", err, string(output))
@@ -911,6 +964,9 @@ func (s *Session) Start(command string) error {
 	// - history-limit 10000: Large scrollback for AI agent output
 	// - escape-time 10: Fast Vim/editor responsiveness (default 500ms is too slow)
 	// - terminal-features hyperlinks: Track hyperlinks like colors (tmux 3.4+, server-wide)
+	//
+	// Note: remain-on-exit is NOT set here — it is only enabled for sandbox sessions
+	// via OptionOverrides to avoid changing behaviour for non-sandbox sessions.
 	_ = exec.Command("tmux",
 		"set-option", "-t", s.Name, "window-style", "default", ";",
 		"set-option", "-t", s.Name, "window-active-style", "default", ";",
@@ -940,14 +996,11 @@ func (s *Session) Start(command string) error {
 	// Shows: session title on left, project folder on right
 	s.ConfigureStatusBar()
 
-	// Send the command to the session
-	if command != "" {
+	// Legacy behavior for non-sandbox sessions: start shell first, then send command.
+	if command != "" && !startWithInitialProcess {
 		cmdToSend := command
-		// IMPORTANT: Commands containing bash-specific syntax (like `session_id=$(...)`)
-		// must be wrapped in `bash -c` for fish shell compatibility (#47).
-		// Fish uses different syntax: `set var (...)` instead of `var=$(...)`.
+		// Commands containing bash-specific syntax must be wrapped for fish users.
 		if strings.Contains(command, "$(") || strings.Contains(command, "session_id=") {
-			// Escape single quotes in the command for bash -c wrapper
 			escapedCmd := strings.ReplaceAll(command, "'", "'\"'\"'")
 			cmdToSend = fmt.Sprintf("bash -c '%s'", escapedCmd)
 		}
@@ -959,7 +1012,11 @@ func (s *Session) Start(command string) error {
 	// Connect control mode pipe for event-driven status detection
 	if pm := GetPipeManager(); pm != nil {
 		if err := pm.Connect(s.Name); err != nil {
-			statusLog.Debug("control_pipe_connect_failed", slog.String("session", s.Name), slog.String("error", err.Error()))
+			statusLog.Debug(
+				"control_pipe_connect_failed",
+				slog.String("session", s.Name),
+				slog.String("error", err.Error()),
+			)
 		}
 	}
 
@@ -991,6 +1048,22 @@ func (s *Session) Exists() bool {
 	// Cache is stale and no live pipe: fall back to direct tmux check.
 	cmd := exec.Command("tmux", "has-session", "-t", s.Name)
 	return cmd.Run() == nil
+}
+
+// IsPaneDead returns true if the session's pane process has exited.
+// Uses the cached pane info (refreshed once per tick) for zero-cost lookups.
+// Falls back to a direct tmux query targeting pane 0.0 (the primary pane)
+// to avoid false positives in multi-pane layouts.
+func (s *Session) IsPaneDead() bool {
+	if info, ok := GetCachedPaneInfo(s.Name); ok {
+		return info.Dead
+	}
+	// Cache miss: direct tmux check targeting the primary pane.
+	out, err := exec.Command("tmux", "list-panes", "-t", s.Name+":0.0", "-F", "#{pane_dead}").Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) == "1"
 }
 
 // ConfigureStatusBar sets up the tmux status bar with session info
@@ -1264,7 +1337,11 @@ func (s *Session) RespawnPane(command string) error {
 	clearTarget := s.Name + ":"
 	clearCmd := exec.Command("tmux", "clear-history", "-t", clearTarget)
 	if clearOut, clearErr := clearCmd.CombinedOutput(); clearErr != nil {
-		respawnLog.Debug("clear_history_failed", slog.String("error", clearErr.Error()), slog.String("output", string(clearOut)))
+		respawnLog.Debug(
+			"clear_history_failed",
+			slog.String("error", clearErr.Error()),
+			slog.String("output", string(clearOut)),
+		)
 	} else {
 		respawnLog.Info("cleared_scrollback", slog.String("session", s.Name))
 	}
@@ -1319,7 +1396,11 @@ func (s *Session) RespawnPane(command string) error {
 	if pm := GetPipeManager(); pm != nil {
 		pm.Disconnect(s.Name)
 		if err := pm.Connect(s.Name); err != nil {
-			statusLog.Debug("control_pipe_reconnect_failed", slog.String("session", s.Name), slog.String("error", err.Error()))
+			statusLog.Debug(
+				"control_pipe_reconnect_failed",
+				slog.String("session", s.Name),
+				slog.String("error", err.Error()),
+			)
 		}
 	}
 
@@ -1413,10 +1494,10 @@ func (s *Session) CapturePane() (string, error) {
 			statusLog.Debug("capture_pane_subprocess_fallback", slog.String("session", s.Name))
 		}
 
-		// Subprocess fallback: -J joins wrapped lines, 3s timeout
+		// Subprocess fallback: 3s timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", s.Name, "-p", "-J")
+		cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", s.Name, "-p", "-e")
 		output, err := cmd.Output()
 		if err != nil {
 			if ctx.Err() == context.DeadlineExceeded {
@@ -1449,7 +1530,7 @@ func (s *Session) CapturePaneFresh() (string, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", s.Name, "-p", "-J")
+	cmd := exec.CommandContext(ctx, "tmux", "capture-pane", "-t", s.Name, "-p", "-e")
 	output, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -1470,8 +1551,7 @@ func (s *Session) CapturePaneFresh() (string, error) {
 func (s *Session) CaptureFullHistory() (string, error) {
 	// Limit to last 2000 lines to balance content availability with memory usage
 	// AI agent conversations can be long - 2000 lines captures ~40-80 screens of content
-	// -J joins wrapped lines and trims trailing spaces so hashes don't change on resize
-	cmd := exec.Command("tmux", "capture-pane", "-t", s.Name, "-p", "-J", "-S", "-2000")
+	cmd := exec.Command("tmux", "capture-pane", "-t", s.Name, "-p", "-e", "-S", "-2000")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to capture history: %w", err)
@@ -1536,25 +1616,12 @@ func (s *Session) DetectTool() string {
 	s.mu.Unlock()
 
 	// Detect tool from command first (most reliable)
-	if s.Command != "" {
-		cmdLower := strings.ToLower(s.Command)
-		var tool string
-		if strings.Contains(cmdLower, "claude") {
-			tool = "claude"
-		} else if strings.Contains(cmdLower, "gemini") {
-			tool = "gemini"
-		} else if strings.Contains(cmdLower, "opencode") || strings.Contains(cmdLower, "open code") {
-			tool = "opencode"
-		} else if strings.Contains(cmdLower, "codex") {
-			tool = "codex"
-		}
-		if tool != "" {
-			s.mu.Lock()
-			s.detectedTool = tool
-			s.toolDetectedAt = time.Now()
-			s.mu.Unlock()
-			return tool
-		}
+	if tool := detectToolFromCommand(s.Command); tool != "" {
+		s.mu.Lock()
+		s.detectedTool = tool
+		s.toolDetectedAt = time.Now()
+		s.mu.Unlock()
+		return tool
 	}
 
 	// Fallback to content detection
@@ -1570,19 +1637,7 @@ func (s *Session) DetectTool() string {
 	// Strip ANSI codes for accurate matching
 	cleanContent := StripANSI(content)
 
-	// Check using pre-compiled patterns
-	detectedTool := "shell"
-	for tool, patterns := range toolDetectionPatterns {
-		for _, pattern := range patterns {
-			if pattern.MatchString(cleanContent) {
-				detectedTool = tool
-				break
-			}
-		}
-		if detectedTool != "shell" {
-			break
-		}
-	}
+	detectedTool := detectToolFromContent(cleanContent)
 
 	s.mu.Lock()
 	s.detectedTool = detectedTool
@@ -1666,6 +1721,15 @@ func (s *Session) GetStatus() (string, error) {
 		return "inactive", nil
 	}
 
+	// Pane dead (process exited with remain-on-exit on) = inactive.
+	if s.IsPaneDead() {
+		s.mu.Lock()
+		s.lastStableStatus = "inactive"
+		s.mu.Unlock()
+		statusLog.Debug("pane_dead", slog.String("session", shortName))
+		return "inactive", nil
+	}
+
 	// FAST PATH: Title-based state detection for Claude Code sessions.
 	// Claude Code sets pane titles via OSC sequences: Braille spinner while working,
 	// ✳ markers when done. One character check replaces full CapturePane + content scan.
@@ -1727,13 +1791,22 @@ func (s *Session) GetStatus() (string, error) {
 	if needsBusyCheck {
 		// Release lock for slow CapturePane operation
 		s.mu.Unlock()
-		content, err := s.CapturePane()
+		rawContent, err := s.CapturePane()
 		s.mu.Lock()
+
+		// Strip ANSI escape sequences for pattern matching.
+		// CapturePane now returns ANSI-rich content (via -e flag) for display,
+		// but status detection needs plain text for reliable string matching.
+		content := StripANSI(rawContent)
 
 		if errors.Is(err, ErrCaptureTimeout) {
 			// Timeout: preserve previous state to avoid false RED flashing
 			if s.lastStableStatus != "" {
-				statusLog.Debug("capture_timeout_preserve", slog.String("session", shortName), slog.String("status", s.lastStableStatus))
+				statusLog.Debug(
+					"capture_timeout_preserve",
+					slog.String("session", shortName),
+					slog.String("status", s.lastStableStatus),
+				)
 				return s.lastStableStatus, nil
 			}
 			// No previous state, fall through to default logic
@@ -1881,7 +1954,13 @@ func (s *Session) GetStatus() (string, error) {
 			// Start new detection window
 			s.stateTracker.activityCheckStart = now
 			s.stateTracker.activityChangeCount = 1
-			statusLog.Debug("activity_start", slog.String("session", shortName), slog.Int64("old_ts", oldTS), slog.Int64("new_ts", currentTS), slog.Int("count", 1))
+			statusLog.Debug(
+				"activity_start",
+				slog.String("session", shortName),
+				slog.Int64("old_ts", oldTS),
+				slog.Int64("new_ts", currentTS),
+				slog.Int("count", 1),
+			)
 		} else {
 			// Within detection window - count this change
 			s.stateTracker.activityChangeCount++
@@ -1981,7 +2060,11 @@ func (s *Session) GetStatus() (string, error) {
 	if !s.stateTracker.activityCheckStart.IsZero() &&
 		time.Since(s.stateTracker.activityCheckStart) < 1*time.Second {
 		// Return previous status - don't flash GREEN on unconfirmed single spike
-		statusLog.Debug("spike_window_pending", slog.String("session", shortName), slog.String("status", s.lastStableStatus))
+		statusLog.Debug(
+			"spike_window_pending",
+			slog.String("session", shortName),
+			slog.String("status", s.lastStableStatus),
+		)
 		if s.lastStableStatus != "" {
 			return s.lastStableStatus, nil
 		}
@@ -2065,7 +2148,7 @@ func (s *Session) getStatusFallback() (string, error) {
 		shortName = shortName[:12]
 	}
 
-	content, err := s.CapturePane()
+	rawContent, err := s.CapturePane()
 	if err != nil {
 		if errors.Is(err, ErrCaptureTimeout) {
 			// Timeout: preserve previous state instead of going inactive
@@ -2073,7 +2156,11 @@ func (s *Session) getStatusFallback() (string, error) {
 			prev := s.lastStableStatus
 			s.mu.Unlock()
 			if prev != "" {
-				statusLog.Debug("fallback_timeout_preserve", slog.String("session", shortName), slog.String("status", prev))
+				statusLog.Debug(
+					"fallback_timeout_preserve",
+					slog.String("session", shortName),
+					slog.String("status", prev),
+				)
 				return prev, nil
 			}
 		}
@@ -2083,6 +2170,9 @@ func (s *Session) getStatusFallback() (string, error) {
 		statusLog.Debug("fallback_inactive", slog.String("session", shortName), slog.String("error", err.Error()))
 		return "inactive", nil
 	}
+
+	// Strip ANSI for reliable pattern matching (CapturePane now returns ANSI-rich content)
+	content := StripANSI(rawContent)
 
 	// Keep precedence aligned with the main path:
 	// 1) busy (authoritative), 2) prompt, 3) waiting/idle.
@@ -2310,19 +2400,7 @@ func inferToolFromSessionFields(detected, custom, command string) string {
 	if custom != "" {
 		return strings.ToLower(custom)
 	}
-	cmd := strings.ToLower(command)
-	switch {
-	case strings.Contains(cmd, "claude"):
-		return "claude"
-	case strings.Contains(cmd, "gemini"):
-		return "gemini"
-	case strings.Contains(cmd, "opencode"), strings.Contains(cmd, "open code"):
-		return "opencode"
-	case strings.Contains(cmd, "codex"):
-		return "codex"
-	default:
-		return ""
-	}
+	return detectToolFromCommand(command)
 }
 
 func defaultResolvedPatternsForTool(tool string) *ResolvedPatterns {
@@ -2428,7 +2506,11 @@ func (s *Session) hasBusyIndicatorResolved(content string) bool {
 		for _, re := range patterns.BusyRegexps {
 			if re.MatchString(recentContent) {
 				tracker.MarkBusy()
-				statusLog.Debug("busy_pattern_match", slog.String("session", shortName), slog.String("pattern", re.String()))
+				statusLog.Debug(
+					"busy_pattern_match",
+					slog.String("session", shortName),
+					slog.String("pattern", re.String()),
+				)
 				return true
 			}
 		}
@@ -2543,7 +2625,13 @@ func startsWithBoxDrawing(line string) bool {
 		return false
 	}
 	r := []rune(trimmedLine)[0]
-	return r == '│' || r == '├' || r == '└' || r == '─' || r == '┌' || r == '┐' || r == '┘' || r == '┤' || r == '┬' || r == '┴' || r == '┼' || r == '╭' || r == '╰' || r == '╮' || r == '╯'
+	return r == '│' || r == '├' || r == '└' || r == '─' || r == '┌' || r == '┐' || r == '┘' || r == '┤' || r == '┬' ||
+		r == '┴' ||
+		r == '┼' ||
+		r == '╭' ||
+		r == '╰' ||
+		r == '╮' ||
+		r == '╯'
 }
 
 // isSustainedActivity checks if activity is sustained (real work) or a spike.
@@ -2580,7 +2668,12 @@ func (s *Session) isSustainedActivity() bool {
 	}
 
 	isSustained := changes >= 1 // At least 1 MORE change after initial detection
-	statusLog.Debug("is_sustained_activity", slog.String("session", s.DisplayName), slog.Int("changes", changes), slog.Bool("sustained", isSustained))
+	statusLog.Debug(
+		"is_sustained_activity",
+		slog.String("session", s.DisplayName),
+		slog.Int("changes", changes),
+		slog.Bool("sustained", isSustained),
+	)
 	return isSustained
 }
 
@@ -2609,7 +2702,9 @@ var (
 	// These cause hash changes when progress updates
 	progressBarPattern = regexp.MustCompile(`\[=*>?\s*\]\s*\d+%`)                  // [====>   ] 45%
 	downloadPattern    = regexp.MustCompile(`\d+\.?\d*[KMGT]?B/\d+\.?\d*[KMGT]?B`) // 1.2MB/5.6MB
-	percentagePattern  = regexp.MustCompile(`\b\d{1,3}%`)                          // 45% (word boundary to avoid false matches)
+	percentagePattern  = regexp.MustCompile(
+		`\b\d{1,3}%`,
+	) // 45% (word boundary to avoid false matches)
 
 	// Time patterns like "12:34" or "12:34:56" that change every second
 	// Gemini and other tools show timestamps that cause hash changes
@@ -2693,7 +2788,7 @@ func (s *Session) normalizeContent(content string) string {
 	result = timePattern.ReplaceAllString(result, "HH:MM:SS")
 
 	// Normalize trailing whitespace per line (fixes resize false positives)
-	// tmux capture-pane -J can add trailing spaces when terminal is resized
+	// tmux capture-pane can include trailing spaces
 	lines := strings.Split(result, "\n")
 	for i, line := range lines {
 		lines[i] = strings.TrimRight(line, " \t")
@@ -2857,6 +2952,7 @@ func (s *Session) WaitForShellPrompt(timeout time.Duration) bool {
 			time.Sleep(pollInterval)
 			continue
 		}
+		content = StripANSI(content)
 
 		// Get the last non-empty line
 		lines := strings.Split(strings.TrimSpace(content), "\n")
@@ -2899,21 +2995,35 @@ func (s *Session) WaitForReady(timeout time.Duration) bool {
 		attempts++
 		content, err := s.CapturePane()
 		if err != nil {
-			statusLog.Debug("wait_for_ready_capture_error", slog.Int("attempt", attempts), slog.String("error", err.Error()))
+			statusLog.Debug(
+				"wait_for_ready_capture_error",
+				slog.Int("attempt", attempts),
+				slog.String("error", err.Error()),
+			)
 			time.Sleep(pollInterval)
 			continue
 		}
+		content = StripANSI(content)
 
 		busy := s.hasBusyIndicator(content)
 		prompt := hasPrompt(content)
 
 		if attempts%10 == 0 { // Log every 10th attempt (every second)
-			statusLog.Debug("wait_for_ready_status", slog.Int("attempt", attempts), slog.Bool("busy", busy), slog.Bool("prompt", prompt))
+			statusLog.Debug(
+				"wait_for_ready_status",
+				slog.Int("attempt", attempts),
+				slog.Bool("busy", busy),
+				slog.Bool("prompt", prompt),
+			)
 		}
 
 		// Check: NOT busy AND has prompt
 		if !busy && prompt {
-			statusLog.Debug("wait_for_ready_detected", slog.Int("attempts", attempts), slog.Float64("seconds", float64(attempts)*0.1))
+			statusLog.Debug(
+				"wait_for_ready_detected",
+				slog.Int("attempts", attempts),
+				slog.Float64("seconds", float64(attempts)*0.1),
+			)
 			return true // Ready for input!
 		}
 
@@ -2926,6 +3036,7 @@ func (s *Session) WaitForReady(timeout time.Duration) bool {
 
 // hasPrompt checks for input prompts (Claude, shell, other agents)
 func hasPrompt(content string) bool {
+	content = StripANSI(content)
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 {
 		return false
@@ -3080,11 +3191,16 @@ func TruncateLogFile(logPath string, maxLines int) error {
 
 	// Write back
 	truncatedData := strings.Join(truncatedLines, "\n")
-	if err := os.WriteFile(logPath, []byte(truncatedData), 0644); err != nil {
+	if err := os.WriteFile(logPath, []byte(truncatedData), 0o644); err != nil {
 		return fmt.Errorf("failed to write truncated log: %w", err)
 	}
 
-	statusLog.Debug("log_truncated", slog.String("file", filepath.Base(logPath)), slog.Int("from_lines", len(lines)), slog.Int("to_lines", len(truncatedLines)))
+	statusLog.Debug(
+		"log_truncated",
+		slog.String("file", filepath.Base(logPath)),
+		slog.Int("from_lines", len(lines)),
+		slog.Int("to_lines", len(truncatedLines)),
+	)
 	return nil
 }
 
@@ -3181,13 +3297,21 @@ func CleanupOrphanedLogs() (removed int, freedBytes int64, err error) {
 		// Remove orphaned log
 		size := info.Size()
 		if err := os.Remove(logPath); err != nil {
-			statusLog.Debug("orphan_remove_failed", slog.String("file", entry.Name()), slog.String("error", err.Error()))
+			statusLog.Debug(
+				"orphan_remove_failed",
+				slog.String("file", entry.Name()),
+				slog.String("error", err.Error()),
+			)
 			continue
 		}
 
 		removed++
 		freedBytes += size
-		statusLog.Debug("orphan_removed", slog.String("file", entry.Name()), slog.Float64("size_kb", float64(size)/1024))
+		statusLog.Debug(
+			"orphan_removed",
+			slog.String("file", entry.Name()),
+			slog.Float64("size_kb", float64(size)/1024),
+		)
 	}
 
 	return removed, freedBytes, nil
@@ -3266,19 +3390,47 @@ func ClearStatusLeft(sessionName string) error {
 	return cmd.Run()
 }
 
+// savedStatusLeft holds the original global status-left value before agent-deck overwrites it.
+// This allows ClearStatusLeftGlobal to restore the user's theme/plugin value (e.g., Oasis, Catppuccin)
+// instead of unsetting it, which would fall back to tmux's built-in default "[#{session_name}]".
+var savedStatusLeft struct {
+	sync.Once
+	value    string
+	captured bool
+}
+
+// captureOriginalStatusLeft reads and stores the current global status-left value.
+// Called once on first SetStatusLeftGlobal to preserve the user's existing value.
+func captureOriginalStatusLeft() {
+	out, err := exec.Command("tmux", "show-option", "-gv", "status-left").Output()
+	if err == nil {
+		savedStatusLeft.value = strings.TrimRight(string(out), "\n")
+		savedStatusLeft.captured = true
+	}
+}
+
 // SetStatusLeftGlobal sets the left side of tmux status bar globally.
 // This is a MAJOR performance optimization: ONE tmux call instead of 100+.
 // All agentdeck sessions inherit this global setting.
+// On first call, captures the existing status-left so ClearStatusLeftGlobal can restore it.
 func SetStatusLeftGlobal(text string) error {
+	savedStatusLeft.Do(captureOriginalStatusLeft)
 	escaped := strings.ReplaceAll(text, "'", "'\\''")
 	cmd := exec.Command("tmux", "set-option", "-g", "status-left", escaped)
 	return cmd.Run()
 }
 
-// ClearStatusLeftGlobal resets status-left to default globally.
+// ClearStatusLeftGlobal restores the original global status-left value.
+// If the original value was captured, it is restored so the user's theme/plugin
+// (e.g., tmux-oasis) is preserved. Falls back to unsetting the option only if
+// no original value was captured.
 func ClearStatusLeftGlobal() error {
-	cmd := exec.Command("tmux", "set-option", "-gu", "status-left")
-	return cmd.Run()
+	if savedStatusLeft.captured {
+		escaped := strings.ReplaceAll(savedStatusLeft.value, "'", "'\\''")
+		return exec.Command("tmux", "set-option", "-g", "status-left", escaped).Run()
+	}
+	// No saved value — fall back to unset (original behavior)
+	return exec.Command("tmux", "set-option", "-gu", "status-left").Run()
 }
 
 // InitializeStatusBarOptions sets optimal status bar options for agent-deck.

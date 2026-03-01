@@ -363,6 +363,8 @@ func handleSessionFork(profile string, args []string) {
 	worktreeBranchLong := fs.String("worktree", "", "Create fork in git worktree for branch")
 	newBranch := fs.Bool("b", false, "Create new branch (use with --worktree)")
 	newBranchLong := fs.Bool("new-branch", false, "Create new branch")
+	sandbox := fs.Bool("sandbox", false, "Run forked session in Docker sandbox")
+	sandboxImage := fs.String("sandbox-image", "", "Docker image for sandbox (overrides config default)")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: agent-deck session fork <id|title> [options]")
@@ -505,6 +507,11 @@ func handleSessionFork(profile string, args []string) {
 	if err != nil {
 		out.Error(fmt.Sprintf("failed to create fork: %v", err), ErrCodeInvalidOperation)
 		os.Exit(1)
+	}
+
+	// Apply sandbox config if requested.
+	if *sandbox {
+		forkedInst.Sandbox = session.NewSandboxConfig(*sandboxImage)
 	}
 
 	// Start the forked session
@@ -1352,10 +1359,14 @@ func handleSessionSend(profile string, args []string) {
 	}
 
 	// Send message atomically (text + Enter in single tmux invocation).
-	// --no-wait: fire-and-forget, skip retry/verification overhead entirely.
-	// Otherwise: retry Enter if the agent doesn't start processing promptly.
+	// --no-wait: skip readiness waiting, but still do a short retry/verification
+	// loop to avoid silent "pasted but not submitted" races.
+	// default mode: full retry budget after readiness check.
 	if *noWait {
-		if err := tmuxSess.SendKeysAndEnter(message); err != nil {
+		if err := sendWithRetryTarget(tmuxSess, message, false, sendRetryOptions{
+			maxRetries: 8,
+			checkDelay: 150 * time.Millisecond,
+		}); err != nil {
 			out.Error(fmt.Sprintf("failed to send message: %v", err), ErrCodeInvalidOperation)
 			os.Exit(1)
 		}
@@ -1641,7 +1652,8 @@ func sendWithRetryTarget(target sendRetryTarget, message string, skipVerify bool
 		time.Sleep(opts.checkDelay)
 
 		unsentPromptDetected := false
-		if content, captureErr := target.CapturePaneFresh(); captureErr == nil {
+		if rawContent, captureErr := target.CapturePaneFresh(); captureErr == nil {
+			content := tmux.StripANSI(rawContent)
 			unsentPromptDetected = hasUnsentPastedPrompt(content) || hasUnsentComposerPrompt(content, message)
 		}
 		status, err := target.GetStatus()
@@ -1726,7 +1738,7 @@ func waitForAgentReady(tmuxSess *tmux.Session, tool string) error {
 		alreadyReady := readyCount >= 10 && attempt >= 15 // At least 3s elapsed
 		if (sawActive && (status == "waiting" || status == "idle")) || alreadyReady {
 			if tool == "claude" {
-				if content, captureErr := tmuxSess.CapturePaneFresh(); captureErr == nil && !hasCurrentComposerPrompt(content) {
+				if rawContent, captureErr := tmuxSess.CapturePaneFresh(); captureErr == nil && !hasCurrentComposerPrompt(tmux.StripANSI(rawContent)) {
 					// Claude can report waiting before the interactive prompt is visible.
 					// Keep polling until the prompt line is present.
 					continue

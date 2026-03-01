@@ -15,11 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/term"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"golang.org/x/term"
 
 	"github.com/asheshgoplani/agent-deck/internal/git"
 	"github.com/asheshgoplani/agent-deck/internal/logging"
@@ -30,7 +29,7 @@ import (
 	"github.com/asheshgoplani/agent-deck/internal/web"
 )
 
-const Version = "0.19.14"
+const Version = "0.19.19"
 
 // Table column widths for list command output
 const (
@@ -529,6 +528,7 @@ func reorderArgsForFlagParsing(args []string) []string {
 		"-w":        true, "--worktree": true,
 		"--location":       true,
 		"--resume-session": true,
+		"--sandbox-image":  true,
 	}
 
 	var flags []string
@@ -610,6 +610,16 @@ func generateUniqueTitle(instances []*session.Instance, baseTitle, path string) 
 	return fmt.Sprintf("%s (%d)", baseTitle, time.Now().Unix())
 }
 
+// isWorktreeAlreadyExistsError detects whether git worktree creation failed because
+// the destination path already exists. This preserves friendly UX while avoiding
+// TOCTOU race windows from separate filesystem pre-checks.
+func isWorktreeAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already exists")
+}
+
 func resolveAutoParentInstance(instances []*session.Instance) *session.Instance {
 	candidates := []string{
 		strings.TrimSpace(os.Getenv("AGENT_DECK_SESSION_ID")),
@@ -667,7 +677,11 @@ func handleAdd(profile string, args []string) {
 	groupShort := fs.String("g", "", "Group path (short)")
 	command := fs.String("cmd", "", "Tool/command to run (e.g., 'claude' or 'codex --dangerously-bypass-approvals-and-sandbox')")
 	commandShort := fs.String("c", "", "Tool/command to run (short)")
-	wrapper := fs.String("wrapper", "", "Wrapper command (use {command} to include tool command; auto-generated when --cmd includes extra args)")
+	wrapper := fs.String(
+		"wrapper",
+		"",
+		"Wrapper command (use {command} to include tool command, e.g., 'nvim +\"terminal {command}\"')",
+	)
 	parent := fs.String("parent", "", "Parent session (creates sub-session, inherits group)")
 	parentShort := fs.String("p", "", "Parent session (short)")
 	noParent := fs.Bool("no-parent", false, "Disable automatic parent linking")
@@ -690,6 +704,10 @@ func handleAdd(profile string, args []string) {
 		mcpFlags = append(mcpFlags, s)
 		return nil
 	})
+
+	// Sandbox flags
+	sandbox := fs.Bool("sandbox", false, "Run session in Docker sandbox")
+	sandboxImage := fs.String("sandbox-image", "", "Docker image for sandbox (overrides config default)")
 
 	// Resume session flag
 	resumeSession := fs.String("resume-session", "", "Claude session ID to resume (skips new session creation)")
@@ -906,15 +924,14 @@ func handleAdd(profile string, args []string) {
 			os.Exit(1)
 		}
 
-		// Check if worktree already exists
-		if _, err := os.Stat(worktreePath); err == nil {
-			fmt.Fprintf(os.Stderr, "Error: worktree already exists at %s\n", worktreePath)
-			fmt.Fprintf(os.Stderr, "Tip: Use 'agent-deck add %s' to add the existing worktree\n", worktreePath)
-			os.Exit(1)
-		}
-
-		// Create worktree
+		// Create worktree atomically (git handles existence checks).
+		// This avoids a TOCTOU race from separate check-then-create steps.
 		if err := git.CreateWorktree(repoRoot, worktreePath, wtBranch); err != nil {
+			if isWorktreeAlreadyExistsError(err) {
+				fmt.Fprintf(os.Stderr, "Error: worktree already exists at %s\n", worktreePath)
+				fmt.Fprintf(os.Stderr, "Tip: Use 'agent-deck add %s' to add the existing worktree\n", worktreePath)
+				os.Exit(1)
+			}
 			fmt.Fprintf(os.Stderr, "Error: failed to create worktree: %v\n", err)
 			os.Exit(1)
 		}
@@ -977,6 +994,11 @@ func handleAdd(profile string, args []string) {
 		newInstance.WorktreePath = worktreePath
 		newInstance.WorktreeRepoRoot = worktreeRepoRoot
 		newInstance.WorktreeBranch = wtBranch
+	}
+
+	// Apply sandbox config if requested.
+	if *sandbox {
+		newInstance.Sandbox = session.NewSandboxConfig(*sandboxImage)
 	}
 
 	// Handle --resume-session: set Claude session ID and resume mode
@@ -1104,6 +1126,16 @@ func handleAdd(profile string, args []string) {
 	}
 	if *resumeSession != "" {
 		jsonData["resume_session"] = *resumeSession
+	}
+	if *sandbox {
+		jsonData["sandbox"] = true
+		humanLines = append(humanLines[:len(humanLines)-3],
+			"  Sandbox: enabled",
+		)
+		humanLines = append(humanLines, "", "Next steps:",
+			fmt.Sprintf("  agent-deck session start %s   # Start the session", sessionTitle),
+			"  agent-deck                         # Open TUI and press Enter to attach",
+		)
 	}
 
 	out.Success(humanLines[0], jsonData)
@@ -1906,14 +1938,38 @@ func handleUpdate(args []string) {
 	// Fetch and display changelog
 	displayChangelog(info.CurrentVersion, info.LatestVersion)
 
+	installPath, homebrewUpgradeCmd, homebrewManaged, hbErr := update.DetectHomebrewManagedInstall()
+	if hbErr != nil {
+		// Non-fatal: fall back to direct updater flow.
+		homebrewManaged = false
+	}
+	homebrewInstallCmd := homebrewUpgradeCmd
+	if homebrewManaged {
+		homebrewInstallCmd = fmt.Sprintf("brew update && %s", homebrewUpgradeCmd)
+	}
+
 	if *checkOnly {
-		fmt.Println("\nRun 'agent-deck update' to install.")
+		if homebrewManaged {
+			fmt.Printf("\nHomebrew-managed install detected at %s\n", installPath)
+			fmt.Printf("Run `%s` to install.\n", homebrewInstallCmd)
+		} else {
+			fmt.Println("\nRun 'agent-deck update' to install.")
+		}
 		return
+	}
+
+	if homebrewManaged {
+		fmt.Printf("\nHomebrew-managed install detected at %s\n", installPath)
+		fmt.Printf("Will run: %s\n", homebrewInstallCmd)
 	}
 
 	// Confirm update - drain any buffered input first to avoid garbage
 	drainStdin()
-	fmt.Print("\nInstall update? [Y/n] ")
+	if homebrewManaged {
+		fmt.Print("\nInstall update via Homebrew now? [Y/n] ")
+	} else {
+		fmt.Print("\nInstall update? [Y/n] ")
+	}
 	reader := bufio.NewReader(os.Stdin)
 	response, _ := reader.ReadString('\n')
 	response = strings.TrimSpace(response)
@@ -1922,11 +1978,18 @@ func handleUpdate(args []string) {
 		return
 	}
 
-	// Perform update
+	// Perform update (direct binary replacement or Homebrew upgrade)
 	fmt.Println()
-	if err := update.PerformUpdate(info.DownloadURL); err != nil {
-		fmt.Printf("Error installing update: %v\n", err)
-		os.Exit(1)
+	if homebrewManaged {
+		if err := runHomebrewUpgradeWithRefresh(homebrewUpgradeCmd); err != nil {
+			fmt.Printf("Error installing update via Homebrew: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := update.PerformUpdate(info.DownloadURL); err != nil {
+			fmt.Printf("Error installing update: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Update bridge.py if conductor is installed
@@ -1937,6 +2000,32 @@ func handleUpdate(args []string) {
 
 	fmt.Printf("\n✓ Updated to v%s\n", info.LatestVersion)
 	fmt.Println("  Restart agent-deck to use the new version.")
+}
+
+func runHomebrewUpgradeWithRefresh(homebrewUpgradeCmd string) error {
+	cmdParts := strings.Fields(homebrewUpgradeCmd)
+	if len(cmdParts) == 0 {
+		return fmt.Errorf("empty Homebrew upgrade command")
+	}
+
+	brewBin := cmdParts[0]
+	refreshCmd := exec.Command(brewBin, "update")
+	refreshCmd.Stdout = os.Stdout
+	refreshCmd.Stderr = os.Stderr
+	refreshCmd.Stdin = os.Stdin
+	if err := refreshCmd.Run(); err != nil {
+		return fmt.Errorf("failed to refresh Homebrew metadata: %w", err)
+	}
+
+	upgradeCmd := exec.Command(brewBin, cmdParts[1:]...)
+	upgradeCmd.Stdout = os.Stdout
+	upgradeCmd.Stderr = os.Stderr
+	upgradeCmd.Stdin = os.Stdin
+	if err := upgradeCmd.Run(); err != nil {
+		return fmt.Errorf("failed to run `%s`: %w", homebrewUpgradeCmd, err)
+	}
+
+	return nil
 }
 
 // displayChangelog fetches and displays changelog between versions
