@@ -323,7 +323,7 @@ func SupportsHyperlinks() bool {
 }
 
 // Tool detection patterns (used by DetectTool for initial tool identification)
-var toolDetectionOrder = []string{"claude", "gemini", "opencode", "codex"}
+var toolDetectionOrder = []string{"claude", "gemini", "opencode", "codex", "copilot"}
 
 var toolDetectionPatterns = map[string][]*regexp.Regexp{
 	"claude": {
@@ -344,6 +344,10 @@ var toolDetectionPatterns = map[string][]*regexp.Regexp{
 		regexp.MustCompile(`(?i)codex`),
 		regexp.MustCompile(`(?i)openai`),
 	},
+	"copilot": {
+		regexp.MustCompile(`(?i)type\s*@\s*to\s*mention`),
+		regexp.MustCompile(`(?m)^[◉◐◎∙]\s`),
+	},
 }
 
 func detectToolFromCommand(command string) string {
@@ -357,6 +361,8 @@ func detectToolFromCommand(command string) string {
 		return "opencode"
 	case strings.Contains(cmdLower, "codex"):
 		return "codex"
+	case strings.Contains(cmdLower, "copilot"):
+		return "copilot"
 	default:
 		return ""
 	}

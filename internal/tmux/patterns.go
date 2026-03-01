@@ -75,6 +75,16 @@ func DefaultRawPatterns(toolName string) *RawPatterns {
 			},
 			PromptPatterns: []string{"How can I help", "codex>", "Continue?"},
 		}
+	case "copilot":
+		return &RawPatterns{
+			BusyPatterns: []string{
+				"Esc to cancel",    // PRIMARY: universal busy indicator across all active states
+				`re:(?m)^[◉◐◎∙]\s`, // SECONDARY: state icon at line start during processing
+			},
+			PromptPatterns: []string{
+				"Type @ to mention files", // PRIMARY: stable idle prompt (normal + plan mode)
+			},
+		}
 	case "shell":
 		return &RawPatterns{
 			PromptPatterns: []string{"$ ", "# ", "% "},

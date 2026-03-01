@@ -476,6 +476,9 @@ func TestDetectToolFromCommand(t *testing.T) {
 		{name: "gemini", command: "gemini --yolo", want: "gemini"},
 		{name: "opencode", command: "open-code --continue", want: "opencode"},
 		{name: "codex", command: "codex --dangerously-bypass-approvals-and-sandbox", want: "codex"},
+		{name: "copilot", command: "copilot", want: "copilot"},
+		{name: "copilot resume", command: "copilot --resume abc123", want: "copilot"},
+		{name: "copilot full path", command: "/usr/local/bin/copilot -i 'hello'", want: "copilot"},
 		{name: "shell command", command: "npm run dev", want: ""},
 		{name: "empty", command: "", want: ""},
 	}
@@ -512,6 +515,43 @@ Do you trust the files in this folder?`,
 			content: `No, and tell Claude what to do differently
 Yes, allow once`,
 			want: "claude",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectToolFromContent(tt.content); got != tt.want {
+				t.Fatalf("detectToolFromContent(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetectToolFromContentCopilot(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "copilot idle prompt",
+			content: "❯  Type @ to mention files\nshift+tab switch mode",
+			want:    "copilot",
+		},
+		{
+			name:    "copilot busy state",
+			content: "◉ Thinking\nEsc to cancel",
+			want:    "copilot",
+		},
+		{
+			name:    "copilot plan mode idle",
+			content: "❯  Describe a plan. Type @ to mention files, / for commands, or ? for shortcuts",
+			want:    "copilot",
+		},
+		{
+			name:    "path containing copilot should stay shell",
+			content: "user@host:/Users/test/copilot-project$\n$ ",
+			want:    "shell",
 		},
 	}
 

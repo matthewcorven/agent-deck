@@ -4118,6 +4118,14 @@ func (i *Instance) CanFork() bool {
 		return i.CanForkOpenCode()
 	}
 
+	// Copilot sessions can fork if session ID is recent
+	if i.Tool == "copilot" {
+		if i.CopilotSessionID == "" {
+			return false
+		}
+		return time.Since(i.CopilotDetectedAt) < 5*time.Minute
+	}
+
 	// Claude sessions can fork if session ID is recent
 	if i.ClaudeSessionID == "" {
 		return false

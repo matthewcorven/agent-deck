@@ -89,6 +89,196 @@ func TestDefaultRawPatterns_Codex(t *testing.T) {
 	}
 }
 
+func TestDefaultRawPatterns_Copilot(t *testing.T) {
+	raw := DefaultRawPatterns("copilot")
+	if raw == nil {
+		t.Fatal("expected non-nil for copilot")
+	}
+	if len(raw.BusyPatterns) == 0 {
+		t.Error("copilot should have busy patterns")
+	}
+	if len(raw.PromptPatterns) == 0 {
+		t.Error("copilot should have prompt patterns")
+	}
+	// Copilot uses state icons (◉◐◎∙), NOT cycling spinners
+	if len(raw.SpinnerChars) > 0 {
+		t.Error("copilot should NOT have spinner chars")
+	}
+	if len(raw.WhimsicalWords) > 0 {
+		t.Error("copilot should NOT have whimsical words")
+	}
+}
+
+func TestCopilotBusyPatterns(t *testing.T) {
+	raw := DefaultRawPatterns("copilot")
+	if raw == nil {
+		t.Fatal("nil raw patterns")
+	}
+	resolved, err := CompilePatterns(raw)
+	if err != nil {
+		t.Fatalf("CompilePatterns: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "thinking state",
+			content: "◉ Thinking\nEsc to cancel",
+			want:    true,
+		},
+		{
+			name:    "tool execution",
+			content: "◐ Running tool_name\nEsc to cancel",
+			want:    true,
+		},
+		{
+			name:    "streaming response",
+			content: "◐ Here is the response text...\nEsc to cancel",
+			want:    true,
+		},
+		{
+			name:    "plan mode thinking",
+			content: "∙ Planning approach\nEsc to cancel",
+			want:    true,
+		},
+		{
+			name:    "idle state should NOT match busy",
+			content: "❯  Type @ to mention files\nshift+tab switch mode",
+			want:    false,
+		},
+		{
+			name:    "shell output should NOT match busy",
+			content: "$ ls -la\ntotal 42\ndrwxr-xr-x  5 user user 160 Feb 18 10:00 .",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched := false
+			for _, s := range resolved.BusyStrings {
+				if strings.Contains(tt.content, s) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				for _, re := range resolved.BusyRegexps {
+					if re.MatchString(tt.content) {
+						matched = true
+						break
+					}
+				}
+			}
+			if matched != tt.want {
+				t.Errorf("busy match = %v, want %v for content %q", matched, tt.want, tt.name)
+			}
+		})
+	}
+}
+
+func TestCopilotPromptPatterns(t *testing.T) {
+	raw := DefaultRawPatterns("copilot")
+	if raw == nil {
+		t.Fatal("nil raw patterns")
+	}
+	resolved, err := CompilePatterns(raw)
+	if err != nil {
+		t.Fatalf("CompilePatterns: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "normal idle",
+			content: "❯  Type @ to mention files\nshift+tab switch mode",
+			want:    true,
+		},
+		{
+			name:    "plan mode idle",
+			content: "❯  Describe a plan. Type @ to mention files, / for commands, or ? for shortcuts",
+			want:    true,
+		},
+		{
+			name:    "thinking should NOT match prompt",
+			content: "◉ Thinking\nEsc to cancel",
+			want:    false,
+		},
+		{
+			name:    "shell output should NOT match prompt",
+			content: "$ ls -la\ntotal 42\ndrwxr-xr-x  5 user user 160 Feb 18 10:00 .",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matched := false
+			for _, s := range resolved.PromptStrings {
+				if strings.Contains(tt.content, s) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				for _, re := range resolved.PromptRegexps {
+					if re.MatchString(tt.content) {
+						matched = true
+						break
+					}
+				}
+			}
+			if matched != tt.want {
+				t.Errorf("prompt match = %v, want %v for content %q", matched, tt.want, tt.name)
+			}
+		})
+	}
+}
+
+func TestCopilotPatternsNoCollision(t *testing.T) {
+	raw := DefaultRawPatterns("copilot")
+	if raw == nil {
+		t.Fatal("nil raw patterns")
+	}
+	resolved, err := CompilePatterns(raw)
+	if err != nil {
+		t.Fatalf("CompilePatterns: %v", err)
+	}
+
+	// Content from OTHER tools and generic shell — copilot busy patterns must NOT match
+	otherContent := []struct {
+		name    string
+		content string
+	}{
+		{"generic shell", "$ ls -la\ntotal 42\ndrwxr-xr-x  5 user user 160 Feb 18 10:00 .\n"},
+		{"claude busy", "✳ Clauding… (10s · ↓ 200 tokens)\nctrl+c to interrupt"},
+		{"gemini prompt", "gemini> Type your message"},
+		{"codex prompt", "How can I help\ncodex>"},
+		{"opencode busy", "thinking...\nesc interrupt"},
+	}
+
+	for _, tc := range otherContent {
+		t.Run(tc.name+"_busy", func(t *testing.T) {
+			for _, s := range resolved.BusyStrings {
+				if strings.Contains(tc.content, s) {
+					t.Errorf("copilot busy string %q false-positives on %s content", s, tc.name)
+				}
+			}
+			for _, re := range resolved.BusyRegexps {
+				if re.MatchString(tc.content) {
+					t.Errorf("copilot busy regex %v false-positives on %s content", re, tc.name)
+				}
+			}
+		})
+	}
+}
+
 func TestDefaultRawPatterns_Unknown(t *testing.T) {
 	raw := DefaultRawPatterns("unknowntool")
 	if raw != nil {
