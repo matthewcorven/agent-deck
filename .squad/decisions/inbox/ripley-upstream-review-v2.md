@@ -1,0 +1,6 @@
+### 2026-02-28: Upstream Review #2 — v0.19.14→v0.19.19 (32 commits, 180 files)
+
+**By:** Ripley (Lead)
+**Status:** Action required — merge upstream + update phase docs
+**What:** Reviewed all 32 upstream commits across 180 files. Key changes: Docker sandbox subsystem (new `internal/docker/`, 2362 lines), ANSI-capture architecture change (`-e` flag + `StripANSI()` pipeline), tool detection refactored into standalone functions with `toolDetectionOrder` array, `applyWrapper()`→`prepareCommand()` signature change (now returns 3 values), Recent Sessions feature (statedb schema v2), NewDialog focus system rewritten to `focusTarget` enum, notifications minimal mode, `SetupConductor()` now 7 params, `ShowDeleteSession()` now 3 params. All `.squad/` and `docs/plans/copilot-cli*` files deleted upstream (66 files) — must be preserved on merge. No dependency changes. Merge is safe with conflict resolution for our fork-only files.
+**Why:** Delayed merging increases conflict surface and makes our phase implementations target stale code. Phase 2 (command builder) and Phase 4 (status detection) are most impacted — both must adopt the new `prepareCommand()` 3-return pattern and ANSI-strip pipeline respectively. Recommend merging immediately, then updating phase docs 1-4 with the new API signatures and patterns documented in this review.

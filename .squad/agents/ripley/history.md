@@ -152,3 +152,113 @@ Analyzed 4 resume captures (Resume_11d97e41, Resume_155f69ab, plus ANSI variants
 - `.squad/decisions/inbox/ripley-pattern-fragility.md` — drop "Describe a task to get started" from PromptPatterns
 
 **Findings updated:** `docs/plans/copilot-cli-captures/findings.md` — §6 revised, §7 updated, §8 appended.
+
+### 2026-02-28 — Upstream Review #2 (v0.19.14 → v0.19.19, 32 commits, 180 files)
+
+Full deep review of upstream divergence. 5 version bumps (v0.19.15–v0.19.19). Major new subsystems and API changes documented below.
+
+**Major new subsystem: Docker Sandbox (`internal/docker/`)**
+- Entirely new package: 9 files, +2362 lines. Container lifecycle management, config, detection, platform-specific keychain handling.
+- `Instance` struct gained `Sandbox *SandboxConfig` and `SandboxContainer string` fields.
+- `applyWrapper()` → `prepareCommand()` — **signature change from `(string, error)` to `(string, string, error)`**. Returns container name as 2nd value. All callers updated.
+- New `wrapIgnoreSuspend()` function wraps commands in `bash -c 'stty susp undef; ...'` — disables Ctrl+Z.
+- `Kill()` now handles sandbox container cleanup (force remove, keychain credential cleanup).
+- `Start()` and `StartWithMessage()` both updated: new `containerName` variable, `buildTmuxOptionOverrides()` replaces inline tmux options, `RunCommandAsInitialProcess` field.
+- `Restart()` updated: all resume paths use `prepareCommand()` instead of `applyWrapper()`.
+- `IsSandboxed()` helper method on Instance.
+- `NewSandboxConfig()` factory function.
+- Phase 1/2 impact: We need `prepareCommand()` for Copilot too. Our command builder must return the same `(string, string, error)` tuple. Sandbox support is free if we follow the pattern.
+
+**Major new feature: Recent Sessions**
+- New `recent_sessions` table in statedb (SchemaVersion bumped to 2).
+- `RecentSessionRow` struct with SHA-256 dedup key.
+- `Storage.SaveRecentSession()` / `LoadRecentSessions()` methods.
+- New dialog in `newdialog.go`: `recentSessions`, `showRecentPicker`, `dialogSnapshot`, `previewRecentSession()`.
+- Home model loads recent sessions into picker on dialog open.
+- Phase 1 impact: When we add Copilot to the tool picker, it automatically becomes available in the recent sessions picker — no extra work.
+
+**ANSI handling architecture change (CRITICAL)**
+- `CapturePane()` and `CapturePaneFresh()` now use `-e` flag instead of `-J`, returning raw ANSI output.
+- All callers now call `tmux.StripANSI()` before pattern matching (status detection, readiness checks, preview content).
+- New import: `github.com/charmbracelet/x/ansi` used in home.go for `ansi.Strip()`.
+- Pattern: `rawContent, err := CapturePane/Fresh(); content := tmux.StripANSI(rawContent)`.
+- **Phase 4 impact: HIGH.** Our Copilot status detection MUST follow this pattern — raw capture → strip ANSI → pattern match. All our BusyPatterns/PromptPatterns will work against clean text.
+
+**Tool detection refactored**
+- `detectToolFromCommand()` and `detectToolFromContent()` extracted as standalone functions in tmux.go.
+- `toolDetectionOrder` array added for deterministic iteration order: `["claude", "gemini", "opencode", "codex"]`.
+- Claude detection patterns tightened: no longer matches bare `(?i)claude` — now requires `\bclaude\s+code\b`, `no, and tell claude`, or `do you trust the files`.
+- **Phase 2 impact: HIGH.** We MUST add `"copilot"` to `toolDetectionOrder` and add entries to `toolDetectionPatterns` map.
+
+**Pane dead detection (new)**
+- `PaneInfo` struct gained `Dead bool` field.
+- `RefreshPaneInfoCache()` now queries `#{pane_dead}` + `#{window_index}` + `#{pane_index}`, only caching window 0, pane 0.
+- `Session.IsPaneDead()` method added — uses cached info or direct tmux check.
+- `GetStatus()` now checks `IsPaneDead()` before title/content detection — dead pane → "inactive".
+- Phase impact: Our Copilot sessions get dead-pane detection for free via the status detection pipeline.
+
+**NewDialog focus system rewritten**
+- Old: integer focus indices (0=name, 1=path, 2=command, 3=branch/options).
+- New: `focusTarget` enum type with named constants: `focusName`, `focusPath`, `focusCommand`, `focusWorktree`, `focusSandbox`, `focusInherited`, `focusBranch`, `focusOptions`.
+- `rebuildFocusTargets()` dynamically builds focus order based on dialog state.
+- **Phase 1 impact: MEDIUM.** If Copilot needs options in the dialog, we add them via the `focusOptions` target (same as Claude/Gemini/Codex). No integer index arithmetic.
+
+**Notification system: minimal mode**
+- `NewNotificationManager` gains 3rd param: `minimal bool`.
+- Minimal mode: icon+count summary (e.g., `● 2 │ ◐ 3 │ ○ 1`) instead of session names.
+- `statusCounts` map for per-status counts. `StatusStarting` counted as `StatusRunning` in display.
+- Phase impact: None — Copilot sessions automatically counted.
+
+**Transition notifier simplified**
+- Removed fallback conductor routing. Now only routes through explicit parent linkage.
+- `transitionDeliveryFallbackSent` constant removed.
+- Phase impact: Minimal. Our Copilot sessions just need `ParentSessionID` set (same as other tools).
+
+**Conductor changes**
+- `SetupConductor()` gained 7th parameter: `clearOnCompact bool` (was 6 params in our last review — now 7: name, profile, heartbeatEnabled, clearOnCompact, description, customClaudeMD, customPolicyMD).
+- `ConductorMeta` gained `ClearOnCompact *bool` field with `GetClearOnCompact()` method (default true).
+- `Instance.ConductorClearOnCompact()` method added.
+- `findAgentDeck()` refactored: now uses `agentDeckPathFromArg0()`, `normalizeExecutablePath()`, `isExecutablePath()`.
+- `buildDaemonPath()` refactored for dedup.
+- Phase impact: None for Copilot directly but Phase 1 conductor_cmd.go tests must pass with new signature.
+
+**Storage changes**
+- `SaveWithGroups()` now calls `UpdateClaudeSessionsWithDedup()` before persisting — enforces dedup at storage layer, not just in-memory.
+- `SaveRecentSession()` / `LoadRecentSessions()` added.
+- Phase impact: Copilot sessions stored/loaded same as others. No special handling needed.
+
+**Confirm dialog API change**
+- `ShowDeleteSession()` signature changed: added 3rd parameter `sandboxed bool`.
+- Phase impact: Any code that calls this must pass the sandbox flag.
+
+**`UpdateClaudeSessionsWithDedup` behavior change**
+- Now works on a copy (`ordered`) to avoid mutating the input slice order as side effect.
+- Uses `sort.SliceStable` instead of `sort.Slice`.
+
+**OpenCode patterns enriched**
+- BusyPatterns expanded: added `"esc to exit"`, `"thinking..."`, `"generating..."`, `"building tool call..."`, `"waiting for tool response..."`.
+- PromptPatterns expanded: added `"press enter to send"`.
+- SpinnerChars added: `"█", "▓", "▒", "░"`.
+- Phase impact: Establishes pattern for how tool-specific patterns grow. Our Copilot patterns follow the same structure.
+
+**buildBashExportPrefix() extracted**
+- Common bash export logic (AGENTDECK_INSTANCE_ID + optional CLAUDE_CONFIG_DIR) extracted into `buildBashExportPrefix()` method.
+- Phase 2 impact: Our Copilot command builder should follow this pattern (extract common prefix logic).
+
+**slog formatting cleanup**
+- Throughout instance.go, tmux.go: multi-arg slog calls reformatted from single-line to multi-line for readability. No functional change.
+
+**Merge analysis:**
+- Our fork has 30 `.squad/` files deleted upstream + 36 `docs/plans/copilot-cli*` files deleted upstream = **66 files deleted upstream that we need to keep**.
+- `git merge upstream/main` will create delete-vs-modify conflicts for our .squad/ and docs/plans/ files.
+- Resolution: `git checkout HEAD -- .squad/ docs/plans/copilot-cli/ docs/plans/copilot-cli-captures/ docs/plans/2026-02-17-copilot-cli-support.md` after merge to restore our files.
+- No go.mod/go.sum changes — zero dependency conflicts.
+- Version bumped from 0.19.14 → 0.19.19.
+
+**Phase plan impact summary:**
+- Phase 1 (Config Surface): Update `SetupConductor` call sites (7 params). `focusTarget` enum system for UI pickers. No other blocking changes.
+- Phase 2 (Command Builder): Must use `prepareCommand()` pattern (3-return-value). Add `"copilot"` to `toolDetectionOrder` + `toolDetectionPatterns`. Follow `buildBashExportPrefix()` extraction pattern.
+- Phase 3 (Session Detection): No new blockers — session filesystem detection unaffected.
+- Phase 4 (Status Detection): MUST use raw-ANSI-capture → `StripANSI()` → pattern-match pipeline. Dead-pane detection is free. Pane title detection N/A for Copilot (already documented).
+- Phase 5 (Preflight): No impact.
+- Phase 6 (Docs/Polish): Config reference format unchanged.
