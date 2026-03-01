@@ -58,6 +58,10 @@ Recommended the Phase 0 execution approach for Copilot CLI integration:
 - `sendMessageWhenReady()` now accepts `"idle"` as ready state alongside `"waiting"`.
 - New `GetLastResponseBestEffort()` — multi-fallback response retrieval. Must use for Copilot.
 - New `CapturePaneFresh()` in tmux — bypasses cache for reliable snapshots. Critical for Phase 0 captures and Phase 4 status detection.
+
+### 2026-02-28 — Phase 1 Config Surface: Execution Complete
+
+Work plan approved and fully executed. All 18+ implementation sites completed by Parker, all 5 test items by Lambert. Naming collision with `Status` constants in `instance.go` was the only blocker — resolved by coordinator with `ToolStatus*` prefix convention. Phase 1 is done. Phase 2 (command builder) is next.
 - New `resolveSessionCommand()` pipeline in CLI — our `detectTool("copilot")` must feed into this.
 - New transition daemon/notifier system — automatically detects Copilot sessions once Phase 4 status patterns exist.
 - New `SendSessionMessageReliable()` helper in send_helper.go.
@@ -262,3 +266,18 @@ Full deep review of upstream divergence. 5 version bumps (v0.19.15–v0.19.19). 
 - Phase 4 (Status Detection): MUST use raw-ANSI-capture → `StripANSI()` → pattern-match pipeline. Dead-pane detection is free. Pane title detection N/A for Copilot (already documented).
 - Phase 5 (Preflight): No impact.
 - Phase 6 (Docs/Polish): Config reference format unchanged.
+
+### 2026-03-01 — Phase 1 Config Surface: Detailed Code Review & Work Plan
+
+**Reviewed all 7 target files against the Phase 1 spec.** Verified line numbers, struct locations, tool list arrays, and icon/color function switch cases.
+
+**Spec accuracy findings:**
+- Line numbers in spec are slightly off vs current codebase (e.g., `CodexSettings` is at line 508, not "~500"; `Codex` field in `UserConfig` is at line 65, not "~56"). Produced exact line references for Parker.
+- Spec misses 3 locations that also need "copilot" added: `GetToolIcon()` in userconfig.go (line 1002, duplicates styles.go logic), `GetCustomToolNames()` builtins map (line 987), and `default_tool` comment strings (lines 25 and 1391).
+- `prepareCommand()` 3-return-value and `focusTarget` enum do NOT affect Phase 1. Copilot has no options panel yet (`updateToolOptions` falls to `default: nil`), and command building is Phase 2.
+- `ForkDialog` is Claude-only (hardcoded `*ClaudeOptionsPanel`) — no tool picker to update. Not Phase 1.
+- `toolDetectionOrder` in tmux.go is detection, not a picker — Phase 2 territory.
+- `detectTool()` in main.go needs "copilot" case — Phase 2 territory.
+- 6 tool list arrays found across 4 files (newdialog.go, settings_panel.go, setup_wizard.go). 2 test files also have hardcoded tool lists (Lambert's domain).
+
+**Key architectural note:** `GetToolIcon()` in userconfig.go (line 1002) and `ToolIcon()` in styles.go (line 585) are parallel implementations — both have switch cases for the same tools. Comment in styles.go explains circular import prevents delegation. Both must be updated in lockstep.

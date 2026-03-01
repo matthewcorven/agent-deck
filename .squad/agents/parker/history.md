@@ -30,3 +30,15 @@ Binary: `copilot` (standalone, `brew install copilot-cli@prerelease` or `npm ins
   - Full analysis: `docs/plans/copilot-cli/copilot-cli-vs-sdk-analysis.md`
 
 - **2026-02-25 — Cross-agent update (Scribe):** Phase 0 hard gate RESOLVED. Ripley chose filesystem-based session ID strategy — scan `~/.copilot/session-state/*/workspace.yaml`, match by cwd/git_root + creation time. Dual-ID model (workspace UUID + session UUID). Fallback: `--continue` flag. **Phase 3 is now unblocked.** See `docs/plans/copilot-cli/phase-0-findings.md` and decision in `.squad/decisions.md`.
+
+- **2026-03-01 — Phase 1 (Config Surface) implemented:**
+  - `CopilotSettings` struct added to `internal/session/userconfig.go` with fields: Command, YoloMode, DefaultModel, DefaultAgent, ConfigDir, EnvFile. `GetCommand()` defaults to "copilot".
+  - `Copilot CopilotSettings` field added to `UserConfig` struct (after Codex, TOML tag `copilot`).
+  - `"copilot"` added to builtins map in `GetCustomToolNames()` and to `GetToolIcon()` switch → 🛸.
+  - `[copilot]` section added to `CreateExampleConfig()` example string.
+  - `IconCopilot = "🛸"` constant added to `internal/ui/styles.go`. `ToolIcon()` and `ToolColor()` both updated (color: `#6e40c9` GitHub purple).
+  - Copilot added to: `buildPresetCommands()` in newdialog.go, `toolNames`/`toolValues` in settings_panel.go, `toolOptions` in setup_wizard.go.
+  - `StatusProvider` interface + `ToolStatus` type created in `internal/session/status_provider.go` (~40 lines). Constants prefixed `ToolStatus*` to avoid collision with existing `Status` string type in instance.go.
+  - `skills/agent-deck/references/config-reference.md` updated: TOC, full `[copilot]` section, built-in icons list, complete example.
+  - **Key collision found:** `instance.go` already defines `StatusIdle`/`StatusError` as `Status` (string). Used `ToolStatusIdle`/`ToolStatusError` (int) to avoid name collision. Lambert's pre-written test file `status_provider_test.go` uses unprefixed names — needs updating by Lambert.
+  - **Dual icon pattern confirmed:** `GetToolIcon()` in userconfig.go AND `ToolIcon()` in styles.go both need copilot — done in both.

@@ -8,6 +8,7 @@ All options for `~/.agent-deck/config.toml`.
 - [[shell] Section](#shell-section)
 - [[claude] Section](#claude-section)
 - [[codex] Section](#codex-section)
+- [[copilot] Section](#copilot-section)
 - [[docker] Section](#docker-section)
 - [[logs] Section](#logs-section)
 - [[updates] Section](#updates-section)
@@ -124,6 +125,29 @@ yolo_mode = true   # Enable --yolo (bypass approvals and sandbox)
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `yolo_mode` | bool | `false` | Maps to `codex --yolo` (`--dangerously-bypass-approvals-and-sandbox`). Can be overridden per-session. |
+
+## [copilot] Section
+
+Copilot CLI integration settings.
+
+```toml
+[copilot]
+command = "copilot"                # Binary name or path (default: "copilot")
+yolo_mode = true                   # Enable auto-approve mode
+default_model = ""                 # Default model for new sessions
+default_agent = ""                 # Default agent for new sessions
+config_dir = "~/.copilot"          # Path to Copilot config directory
+env_file = "~/.copilot.env"        # .env file specific to Copilot sessions
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `command` | string | `"copilot"` | Copilot binary name or path. Allows overriding for custom installs. |
+| `yolo_mode` | bool | `false` | Enable auto-approve mode for Copilot sessions. Can be overridden per-session. |
+| `default_model` | string | `""` | Default model for new Copilot sessions. |
+| `default_agent` | string | `""` | Default agent for new Copilot sessions. |
+| `config_dir` | string | `""` | Copilot config directory. |
+| `env_file` | string | `""` | A .env file sourced for Copilot sessions only. Sourced after global `[shell].env_files`. See [Path Resolution](#path-resolution). |
 
 ## [docker] Section
 
@@ -386,7 +410,7 @@ env = { API_KEY = "token", BASE_URL = "https://api.example.com" }
 | `env_file` | string | No | A .env file sourced for this tool only. Sourced after global `[shell].env_files`. See [Path Resolution](#path-resolution). |
 | `env` | map | No | Inline environment variables exported for this tool. These take highest priority, overriding both `[shell].env_files` and `env_file`. Values are single-quoted to prevent shell expansion. |
 
-**Built-in icons:** claude=🤖, gemini=✨, opencode=🌐, codex=💻, cursor=📝, shell=🐚
+**Built-in icons:** claude=🤖, gemini=✨, opencode=🌐, codex=💻, copilot=🛸, cursor=📝, shell=🐚
 
 ## Path Resolution
 
@@ -422,6 +446,9 @@ config_dir = "~/.claude-work"
 
 [codex]
 yolo_mode = false
+
+[copilot]
+command = "copilot"
 
 [docker]
 default_enabled = false

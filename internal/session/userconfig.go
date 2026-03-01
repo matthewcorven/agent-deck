@@ -22,7 +22,7 @@ const UserConfigFileName = "config.toml"
 // UserConfig represents user-facing configuration in TOML format
 type UserConfig struct {
 	// DefaultTool is the pre-selected AI tool when creating new sessions
-	// Valid values: "claude", "gemini", "opencode", "codex", or any custom tool name
+	// Valid values: "claude", "gemini", "opencode", "codex", "copilot", or any custom tool name
 	// If empty or invalid, defaults to "shell" (no pre-selection)
 	DefaultTool string `toml:"default_tool"`
 
@@ -63,6 +63,9 @@ type UserConfig struct {
 
 	// Codex defines Codex CLI integration settings
 	Codex CodexSettings `toml:"codex"`
+
+	// Copilot defines Copilot CLI integration settings
+	Copilot CopilotSettings `toml:"copilot"`
 
 	// Worktree defines git worktree preferences
 	Worktree WorktreeSettings `toml:"worktree"`
@@ -510,6 +513,37 @@ type CodexSettings struct {
 	// YoloMode enables --yolo flag for Codex sessions (bypass approvals and sandbox)
 	// Default: false
 	YoloMode bool `toml:"yolo_mode"`
+}
+
+// CopilotSettings defines Copilot CLI configuration
+type CopilotSettings struct {
+	// Command is the copilot binary name or path
+	// Default: "copilot"
+	Command string `toml:"command"`
+
+	// YoloMode enables auto-approve mode for Copilot sessions
+	// Default: false
+	YoloMode bool `toml:"yolo_mode"`
+
+	// DefaultModel sets the default model for new sessions
+	DefaultModel string `toml:"default_model"`
+
+	// DefaultAgent sets the default agent for new sessions
+	DefaultAgent string `toml:"default_agent"`
+
+	// ConfigDir is the path to the Copilot config directory
+	ConfigDir string `toml:"config_dir"`
+
+	// EnvFile is a .env file sourced for Copilot sessions only
+	EnvFile string `toml:"env_file"`
+}
+
+// GetCommand returns the copilot command, defaulting to "copilot" if empty.
+func (c *CopilotSettings) GetCommand() string {
+	if c.Command == "" {
+		return "copilot"
+	}
+	return c.Command
 }
 
 // WorktreeSettings contains git worktree preferences.
@@ -982,7 +1016,7 @@ func GetCustomToolNames() []string {
 
 	builtins := map[string]bool{
 		"claude": true, "gemini": true, "opencode": true,
-		"codex": true, "shell": true, "cursor": true, "aider": true,
+		"codex": true, "copilot": true, "shell": true, "cursor": true, "aider": true,
 	}
 
 	var names []string
@@ -1015,6 +1049,8 @@ func GetToolIcon(toolName string) string {
 		return "🌐"
 	case "codex":
 		return "💻"
+	case "copilot":
+		return "🛸"
 	case "cursor":
 		return "📝"
 	case "shell":
@@ -1388,7 +1424,7 @@ func CreateExampleConfig() error {
 
 # Default AI tool for new sessions
 # When creating a new session (pressing 'n'), this tool will be pre-selected
-# Valid values: "claude", "gemini", "opencode", "codex", or any custom tool name
+# Valid values: "claude", "gemini", "opencode", "codex", "copilot", or any custom tool name
 # Leave commented out or empty to default to shell (no pre-selection)
 # default_tool = "claude"
 
@@ -1419,6 +1455,21 @@ func CreateExampleConfig() error {
 # [codex]
 # Enable --yolo (bypass approvals and sandbox) by default (default: false)
 # yolo_mode = true
+
+# Copilot CLI integration
+# [copilot]
+# Custom copilot binary name or path (default: "copilot")
+# command = "copilot"
+# Enable auto-approve mode by default (default: false)
+# yolo_mode = true
+# Default model for new sessions
+# default_model = ""
+# Default agent for new sessions
+# default_agent = ""
+# Config directory (default: ~/.copilot)
+# config_dir = "~/.copilot"
+# .env file specific to Copilot sessions
+# env_file = ""
 
 # Log file management
 # Agent-deck logs session output to ~/.agent-deck/logs/ for status detection

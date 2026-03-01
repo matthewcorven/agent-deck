@@ -190,6 +190,7 @@ const (
 	IconGemini   = "✨"
 	IconOpenCode = "🌐"
 	IconCodex    = "💻"
+	IconCopilot  = "🛸"
 	IconShell    = "🐚"
 )
 
@@ -595,6 +596,8 @@ func ToolIcon(tool string) string {
 		return IconOpenCode
 	case "codex":
 		return IconCodex
+	case "copilot":
+		return IconCopilot
 	case "cursor":
 		return "📝"
 	case "shell":
@@ -614,6 +617,8 @@ func ToolColor(tool string) lipgloss.Color {
 		return ColorPurple // Google AI purple
 	case "codex":
 		return ColorCyan // Light blue for OpenAI
+	case "copilot":
+		return lipgloss.Color("#6e40c9") // GitHub purple
 	case "aider":
 		return ColorRed // Red for Aider
 	case "cursor":

@@ -808,3 +808,98 @@ inject_status_line = true
 		t.Error("GetInjectStatusLine should be true when set to true")
 	}
 }
+
+// ============================================================================
+// CopilotSettings Tests (Phase 1 — Config Surface)
+// ============================================================================
+
+func TestCopilotSettings_GetCommandDefault(t *testing.T) {
+	// When Command is empty, GetCommand() should return "copilot"
+	s := CopilotSettings{}
+	if got := s.GetCommand(); got != "copilot" {
+		t.Errorf("GetCommand() with empty Command: got %q, want %q", got, "copilot")
+	}
+}
+
+func TestCopilotSettings_GetCommandCustom(t *testing.T) {
+	s := CopilotSettings{Command: "/usr/local/bin/gh-copilot"}
+	if got := s.GetCommand(); got != "/usr/local/bin/gh-copilot" {
+		t.Errorf("GetCommand() with custom Command: got %q, want %q", got, "/usr/local/bin/gh-copilot")
+	}
+}
+
+func TestCopilotSettings_YoloModeDefaultsFalse(t *testing.T) {
+	s := CopilotSettings{}
+	if s.YoloMode {
+		t.Error("YoloMode should default to false (zero value)")
+	}
+}
+
+func TestCopilotSettings_TOMLRoundtrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	configContent := `
+[copilot]
+command = "my-copilot"
+yolo_mode = true
+default_model = "claude-sonnet-4-5"
+default_agent = "researcher"
+config_dir = "~/.copilot-work"
+env_file = ".env.copilot"
+`
+	configPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	var config UserConfig
+	_, err := toml.DecodeFile(configPath, &config)
+	if err != nil {
+		t.Fatalf("Failed to decode: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"Command", config.Copilot.GetCommand(), "my-copilot"},
+		{"DefaultModel", config.Copilot.DefaultModel, "claude-sonnet-4-5"},
+		{"DefaultAgent", config.Copilot.DefaultAgent, "researcher"},
+		{"ConfigDir", config.Copilot.ConfigDir, "~/.copilot-work"},
+		{"EnvFile", config.Copilot.EnvFile, ".env.copilot"},
+	}
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("Copilot.%s = %q, want %q", tt.name, tt.got, tt.want)
+		}
+	}
+	if !config.Copilot.YoloMode {
+		t.Error("Copilot.YoloMode should be true")
+	}
+}
+
+func TestCopilotSettings_EmptySection(t *testing.T) {
+	tmpDir := t.TempDir()
+	configContent := `default_tool = "copilot"`
+	configPath := filepath.Join(tmpDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(configContent), 0600); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	var config UserConfig
+	_, err := toml.DecodeFile(configPath, &config)
+	if err != nil {
+		t.Fatalf("Failed to decode: %v", err)
+	}
+
+	// Zero-value struct: GetCommand should still return default
+	if got := config.Copilot.GetCommand(); got != "copilot" {
+		t.Errorf("GetCommand() on zero-value: got %q, want %q", got, "copilot")
+	}
+	if config.Copilot.YoloMode {
+		t.Error("YoloMode should be false when not specified")
+	}
+	if config.Copilot.DefaultModel != "" {
+		t.Errorf("DefaultModel should be empty, got %q", config.Copilot.DefaultModel)
+	}
+}

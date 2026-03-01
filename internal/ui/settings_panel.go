@@ -78,8 +78,8 @@ type SettingsPanel struct {
 
 // Tool names for radio selection
 var (
-	toolNames  = []string{"Claude", "Gemini", "OpenCode", "Codex", "None"}
-	toolValues = []string{"claude", "gemini", "opencode", "codex", ""}
+	toolNames  = []string{"Claude", "Gemini", "OpenCode", "Codex", "Copilot", "None"}
+	toolValues = []string{"claude", "gemini", "opencode", "codex", "copilot", ""}
 )
 
 // Search tier names for radio selection
