@@ -718,6 +718,21 @@ func (i *Instance) buildCodexCommand(baseCommand string) string {
 	return envPrefix + baseCommand
 }
 
+// preflightCopilot verifies the Copilot CLI binary is available before starting a session.
+func (i *Instance) preflightCopilot() error {
+	copilotCmd := "copilot"
+	if config, err := LoadUserConfig(); err == nil && config != nil {
+		copilotCmd = config.Copilot.GetCommand()
+	}
+	if _, err := exec.LookPath(copilotCmd); err != nil {
+		return fmt.Errorf(
+			"copilot CLI not found in PATH (%q). Install it:\n"+
+				"  brew install copilot-cli\n"+
+				"  npm install -g @github/copilot", copilotCmd)
+	}
+	return nil
+}
+
 // buildCopilotCommand builds the command for GitHub Copilot CLI
 // Copilot stores sessions in ~/.copilot/session-state/
 // Resume: copilot --resume <session-id>
@@ -1747,6 +1762,13 @@ func (i *Instance) Start() error {
 		return fmt.Errorf("tmux session not initialized")
 	}
 
+	// Preflight check for tools that need binary validation
+	if i.Tool == "copilot" {
+		if err := i.preflightCopilot(); err != nil {
+			return err
+		}
+	}
+
 	// Build command based on tool type
 	// Priority: built-in tools (claude, gemini, opencode, codex) → custom tools from config.toml → raw command
 	var command string
@@ -1843,6 +1865,13 @@ func (i *Instance) Start() error {
 func (i *Instance) StartWithMessage(message string) error {
 	if i.tmuxSession == nil {
 		return fmt.Errorf("tmux session not initialized")
+	}
+
+	// Preflight check for tools that need binary validation
+	if i.Tool == "copilot" {
+		if err := i.preflightCopilot(); err != nil {
+			return err
+		}
 	}
 
 	// Start session normally (no embedded message logic)
@@ -3626,6 +3655,13 @@ func (i *Instance) Restart() error {
 		}
 	} else if skipRegen {
 		mcpLog.Debug("mcp_regen_skipped", slog.String("reason", "flag_set_by_apply"))
+	}
+
+	// Preflight check for tools that need binary validation
+	if i.Tool == "copilot" {
+		if err := i.preflightCopilot(); err != nil {
+			return err
+		}
 	}
 
 	// Sync Claude session from disk before restart to pick up /clear session changes

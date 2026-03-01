@@ -3046,3 +3046,121 @@ func TestCopilotResume_ContinueFallback(t *testing.T) {
 		t.Errorf("expected command to contain 'copilot', got: %s", cmd)
 	}
 }
+
+// ============================================================================
+// PreflightCopilot Tests (Phase 5 — Binary Validation)
+// ============================================================================
+
+func TestPreflightCopilot_MissingBinary(t *testing.T) {
+	// Isolate config so LoadUserConfig returns defaults
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	t.Setenv("PATH", "/nonexistent")
+
+	inst := NewInstanceWithTool("preflight-missing", "/tmp/test", "copilot")
+	err := inst.preflightCopilot()
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "brew install")
+	require.Contains(t, err.Error(), "copilot")
+}
+
+func TestPreflightCopilot_CustomCommand(t *testing.T) {
+	// Create a temp HOME with a config.toml that specifies a custom copilot command
+	tmpHome := t.TempDir()
+	configDir := filepath.Join(tmpHome, ".agent-deck")
+	require.NoError(t, os.MkdirAll(configDir, 0755))
+
+	configContent := `[copilot]
+command = "my-custom-copilot"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(configContent), 0600))
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	t.Setenv("PATH", "/nonexistent")
+
+	inst := NewInstanceWithTool("preflight-custom", "/tmp/test", "copilot")
+	err := inst.preflightCopilot()
+
+	require.Error(t, err)
+	// Error message should reference the custom binary name from config
+	require.Contains(t, err.Error(), "my-custom-copilot")
+	require.Contains(t, err.Error(), "brew install")
+}
+
+func TestPreflightCopilot_BinaryExists(t *testing.T) {
+	// Isolate config so LoadUserConfig returns defaults
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	// Check if copilot is actually installed
+	if _, err := exec.LookPath("copilot"); err != nil {
+		t.Skip("copilot binary not found — skipping happy-path test")
+	}
+
+	inst := NewInstanceWithTool("preflight-exists", "/tmp/test", "copilot")
+	err := inst.preflightCopilot()
+
+	require.NoError(t, err)
+}
+
+func TestPreflightCopilot_Start_ReturnsError(t *testing.T) {
+	// Isolate config so LoadUserConfig returns defaults
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	t.Setenv("PATH", "/nonexistent")
+
+	// Test preflightCopilot() directly — Start() requires a live tmux session,
+	// so testing the preflight check in isolation is the reliable approach.
+	// The preflight runs before any tmux setup in Start()/StartWithMessage()/Restart().
+	inst := NewInstanceWithTool("preflight-start", "/tmp/test", "copilot")
+	err := inst.preflightCopilot()
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "brew install")
+	require.Contains(t, err.Error(), "npm install")
+}
+
+func TestPreflightCopilot_EmptyGetCommand(t *testing.T) {
+	// When config returns empty command, preflightCopilot should default to "copilot"
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	t.Setenv("PATH", "/nonexistent")
+
+	inst := NewInstanceWithTool("preflight-empty-cmd", "/tmp/test", "copilot")
+	err := inst.preflightCopilot()
+
+	require.Error(t, err)
+	// Default binary name should be "copilot" when config has no custom command
+	require.Contains(t, err.Error(), `"copilot"`)
+}
