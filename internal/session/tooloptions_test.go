@@ -744,3 +744,265 @@ func TestClaudeOptions_RoundTrip(t *testing.T) {
 		t.Errorf("round-trip failed: original=%+v, restored=%+v", original, restored)
 	}
 }
+
+// === Copilot Options Tests ===
+
+func TestCopilotOptions_ToolName(t *testing.T) {
+	opts := &CopilotOptions{}
+	if opts.ToolName() != "copilot" {
+		t.Errorf("expected ToolName() = 'copilot', got %q", opts.ToolName())
+	}
+}
+
+func TestCopilotOptions_ToArgs(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     CopilotOptions
+		expected []string
+	}{
+		{
+			name:     "empty options",
+			opts:     CopilotOptions{},
+			expected: nil,
+		},
+		{
+			name:     "new session mode (default)",
+			opts:     CopilotOptions{SessionMode: "new"},
+			expected: nil,
+		},
+		{
+			name:     "continue mode",
+			opts:     CopilotOptions{SessionMode: "continue"},
+			expected: []string{"--continue"},
+		},
+		{
+			name: "resume mode with session ID",
+			opts: CopilotOptions{
+				SessionMode:     "resume",
+				ResumeSessionID: "SESSION-ID-123",
+			},
+			expected: []string{"--resume", "SESSION-ID-123"},
+		},
+		{
+			name:     "resume mode without session ID",
+			opts:     CopilotOptions{SessionMode: "resume"},
+			expected: nil,
+		},
+		{
+			name:     "model only",
+			opts:     CopilotOptions{Model: "gpt-4o"},
+			expected: []string{"--model", "gpt-4o"},
+		},
+		{
+			name:     "agent only",
+			opts:     CopilotOptions{Agent: "coder"},
+			expected: []string{"--agent", "coder"},
+		},
+		{
+			name:     "yolo only",
+			opts:     CopilotOptions{YoloMode: boolPtr(true)},
+			expected: []string{"--yolo"},
+		},
+		{
+			name:     "yolo false",
+			opts:     CopilotOptions{YoloMode: boolPtr(false)},
+			expected: nil,
+		},
+		{
+			name:     "config-dir only",
+			opts:     CopilotOptions{ConfigDir: "/home/user/.copilot-work"},
+			expected: []string{"--config-dir", "/home/user/.copilot-work"},
+		},
+		{
+			name: "all flags combined",
+			opts: CopilotOptions{
+				SessionMode:     "continue",
+				Model:           "gpt-4o",
+				Agent:           "reviewer",
+				YoloMode:        boolPtr(true),
+				ConfigDir:       "/tmp/copilot-cfg",
+			},
+			expected: []string{"--continue", "--model", "gpt-4o", "--agent", "reviewer", "--yolo", "--config-dir", "/tmp/copilot-cfg"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.opts.ToArgs()
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Errorf("ToArgs() = %v, expected %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCopilotOptions_ToArgsForFork(t *testing.T) {
+	tests := []struct {
+		name     string
+		opts     CopilotOptions
+		expected []string
+	}{
+		{
+			name:     "empty options",
+			opts:     CopilotOptions{},
+			expected: nil,
+		},
+		{
+			name: "session mode ignored for fork",
+			opts: CopilotOptions{
+				SessionMode:     "resume",
+				ResumeSessionID: "SESSION-ID-123",
+			},
+			expected: nil,
+		},
+		{
+			name: "model and agent preserved for fork",
+			opts: CopilotOptions{
+				SessionMode: "continue",
+				Model:       "gpt-4o",
+				Agent:       "coder",
+			},
+			expected: []string{"--model", "gpt-4o", "--agent", "coder"},
+		},
+		{
+			name: "yolo preserved for fork",
+			opts: CopilotOptions{
+				SessionMode: "continue",
+				YoloMode:    boolPtr(true),
+			},
+			expected: []string{"--yolo"},
+		},
+		{
+			name: "config-dir preserved for fork",
+			opts: CopilotOptions{
+				SessionMode: "resume",
+				ConfigDir:   "/tmp/copilot-cfg",
+			},
+			expected: []string{"--config-dir", "/tmp/copilot-cfg"},
+		},
+		{
+			name: "all non-session flags preserved for fork",
+			opts: CopilotOptions{
+				SessionMode: "continue",
+				Model:       "gpt-4o",
+				Agent:       "reviewer",
+				YoloMode:    boolPtr(true),
+				ConfigDir:   "/tmp/copilot-cfg",
+			},
+			expected: []string{"--model", "gpt-4o", "--agent", "reviewer", "--yolo", "--config-dir", "/tmp/copilot-cfg"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.opts.ToArgsForFork()
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Errorf("ToArgsForFork() = %v, expected %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCopilotOptions_MarshalUnmarshal(t *testing.T) {
+	original := &CopilotOptions{
+		SessionMode:     "resume",
+		ResumeSessionID: "copilot-session-abc",
+		Model:           "gpt-4o",
+		Agent:           "reviewer",
+		YoloMode:        boolPtr(true),
+		ConfigDir:       "/tmp/copilot-cfg",
+	}
+
+	data, err := MarshalToolOptions(original)
+	if err != nil {
+		t.Fatalf("MarshalToolOptions failed: %v", err)
+	}
+
+	restored, err := UnmarshalCopilotOptions(data)
+	if err != nil {
+		t.Fatalf("UnmarshalCopilotOptions failed: %v", err)
+	}
+
+	if !reflect.DeepEqual(original, restored) {
+		t.Errorf("round-trip failed: original=%+v, restored=%+v", original, restored)
+	}
+}
+
+func TestNewCopilotOptions(t *testing.T) {
+	config := &UserConfig{
+		Copilot: CopilotSettings{
+			DefaultModel: "gpt-4o",
+			DefaultAgent: "coder",
+			YoloMode:     true,
+			ConfigDir:    "/home/user/.copilot-custom",
+		},
+	}
+	opts := NewCopilotOptions(config)
+
+	if opts.SessionMode != "new" {
+		t.Errorf("expected SessionMode='new', got %q", opts.SessionMode)
+	}
+	if opts.Model != "gpt-4o" {
+		t.Errorf("expected Model='gpt-4o', got %q", opts.Model)
+	}
+	if opts.Agent != "coder" {
+		t.Errorf("expected Agent='coder', got %q", opts.Agent)
+	}
+	if opts.YoloMode == nil || !*opts.YoloMode {
+		t.Error("expected YoloMode=true from config")
+	}
+	if opts.ConfigDir != "/home/user/.copilot-custom" {
+		t.Errorf("expected ConfigDir from config, got %q", opts.ConfigDir)
+	}
+}
+
+func TestNewCopilotOptions_NilConfig(t *testing.T) {
+	opts := NewCopilotOptions(nil)
+
+	if opts.SessionMode != "new" {
+		t.Errorf("expected SessionMode='new', got %q", opts.SessionMode)
+	}
+	if opts.Model != "" {
+		t.Errorf("expected empty Model, got %q", opts.Model)
+	}
+	if opts.Agent != "" {
+		t.Errorf("expected empty Agent, got %q", opts.Agent)
+	}
+	if opts.YoloMode != nil {
+		t.Errorf("expected YoloMode=nil, got %v", *opts.YoloMode)
+	}
+	if opts.ConfigDir != "" {
+		t.Errorf("expected empty ConfigDir, got %q", opts.ConfigDir)
+	}
+}
+
+func TestUnmarshalCopilotOptions_EmptyData(t *testing.T) {
+	result, err := UnmarshalCopilotOptions(nil)
+	if err != nil {
+		t.Fatalf("UnmarshalCopilotOptions(nil) failed: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil for empty data, got %v", result)
+	}
+
+	result, err = UnmarshalCopilotOptions([]byte{})
+	if err != nil {
+		t.Fatalf("UnmarshalCopilotOptions([]) failed: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil for empty slice, got %v", result)
+	}
+}
+
+func TestUnmarshalCopilotOptions_WrongTool(t *testing.T) {
+	claudeOpts := &ClaudeOptions{SkipPermissions: true}
+	data, _ := MarshalToolOptions(claudeOpts)
+
+	result, err := UnmarshalCopilotOptions(data)
+	if err != nil {
+		t.Fatalf("UnmarshalCopilotOptions failed: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil for wrong tool, got %v", result)
+	}
+}

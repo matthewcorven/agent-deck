@@ -295,3 +295,115 @@ func UnmarshalClaudeOptions(data json.RawMessage) (*ClaudeOptions, error) {
 
 	return &opts, nil
 }
+
+// CopilotOptions holds launch options for Copilot CLI sessions
+type CopilotOptions struct {
+	// SessionMode: "new" (default), "continue", or "resume"
+	SessionMode string `json:"session_mode,omitempty"`
+	// ResumeSessionID is the session ID for --resume flag (only when SessionMode="resume")
+	ResumeSessionID string `json:"resume_session_id,omitempty"`
+	// Model overrides the model (e.g., "gpt-4o")
+	Model string `json:"model,omitempty"`
+	// Agent overrides the agent to use
+	Agent string `json:"agent,omitempty"`
+	// YoloMode enables --yolo flag (auto-approve mode)
+	// nil = inherit from global config, true/false = explicit override
+	YoloMode *bool `json:"yolo_mode,omitempty"`
+	// ConfigDir overrides the Copilot config directory
+	ConfigDir string `json:"config_dir,omitempty"`
+}
+
+// ToolName returns "copilot"
+func (o *CopilotOptions) ToolName() string {
+	return "copilot"
+}
+
+// ToArgs returns command-line arguments based on options
+func (o *CopilotOptions) ToArgs() []string {
+	var args []string
+
+	// Session mode flags (mutually exclusive)
+	switch o.SessionMode {
+	case "continue":
+		args = append(args, "--continue")
+	case "resume":
+		if o.ResumeSessionID != "" {
+			args = append(args, "--resume", o.ResumeSessionID)
+		}
+	}
+	// "new" or empty = default behavior, no special flag
+
+	if o.Model != "" {
+		args = append(args, "--model", o.Model)
+	}
+	if o.Agent != "" {
+		args = append(args, "--agent", o.Agent)
+	}
+	if o.YoloMode != nil && *o.YoloMode {
+		args = append(args, "--yolo")
+	}
+	if o.ConfigDir != "" {
+		args = append(args, "--config-dir", o.ConfigDir)
+	}
+
+	return args
+}
+
+// ToArgsForFork returns arguments suitable for fork resume command.
+// Fork uses --resume internally, so session mode flags are excluded.
+func (o *CopilotOptions) ToArgsForFork() []string {
+	var args []string
+	if o.Model != "" {
+		args = append(args, "--model", o.Model)
+	}
+	if o.Agent != "" {
+		args = append(args, "--agent", o.Agent)
+	}
+	if o.YoloMode != nil && *o.YoloMode {
+		args = append(args, "--yolo")
+	}
+	if o.ConfigDir != "" {
+		args = append(args, "--config-dir", o.ConfigDir)
+	}
+	return args
+}
+
+// NewCopilotOptions creates CopilotOptions with defaults from config
+func NewCopilotOptions(config *UserConfig) *CopilotOptions {
+	opts := &CopilotOptions{
+		SessionMode: "new",
+	}
+	if config != nil {
+		if config.Copilot.YoloMode {
+			yolo := true
+			opts.YoloMode = &yolo
+		}
+		opts.Model = config.Copilot.DefaultModel
+		opts.Agent = config.Copilot.DefaultAgent
+		opts.ConfigDir = config.Copilot.ConfigDir
+	}
+	return opts
+}
+
+// UnmarshalCopilotOptions deserializes CopilotOptions from JSON wrapper
+func UnmarshalCopilotOptions(data json.RawMessage) (*CopilotOptions, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	var wrapper ToolOptionsWrapper
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return nil, err
+	}
+
+	if wrapper.Tool != "copilot" {
+		return nil, nil
+	}
+
+	var opts CopilotOptions
+	if err := json.Unmarshal(wrapper.Options, &opts); err != nil {
+		return nil, err
+	}
+
+	return &opts, nil
+}

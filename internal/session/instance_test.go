@@ -2539,3 +2539,180 @@ func TestCurrentComposerPrompt_UsesBottomComposerBlock(t *testing.T) {
 		t.Fatalf("unexpected composer prompt.\nwant: %q\ngot:  %q", want, got)
 	}
 }
+
+// === Copilot Command Builder Tests ===
+
+func TestBuildCopilotCommand_New(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	inst := NewInstanceWithTool("test", "/tmp/test", "copilot")
+
+	cmd := inst.buildCopilotCommand("copilot")
+
+	// Should contain the copilot binary
+	if !strings.Contains(cmd, "copilot") {
+		t.Errorf("expected command to contain 'copilot', got: %s", cmd)
+	}
+	// Should set AGENTDECK env vars
+	if !strings.Contains(cmd, "AGENTDECK_INSTANCE_ID=") {
+		t.Errorf("expected AGENTDECK_INSTANCE_ID env var, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "AGENTDECK_TOOL=copilot") {
+		t.Errorf("expected AGENTDECK_TOOL=copilot env var, got: %s", cmd)
+	}
+	// Should NOT contain --resume when no session ID
+	if strings.Contains(cmd, "--resume") {
+		t.Errorf("new session should NOT have --resume, got: %s", cmd)
+	}
+}
+
+func TestBuildCopilotCommand_Resume(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	inst := NewInstanceWithTool("test", "/tmp/test", "copilot")
+	inst.CopilotSessionID = "copilot-session-xyz"
+
+	cmd := inst.buildCopilotCommand("copilot")
+
+	// Should include --resume with session ID
+	if !strings.Contains(cmd, "--resume copilot-session-xyz") {
+		t.Errorf("resume command should contain '--resume copilot-session-xyz', got: %s", cmd)
+	}
+	// Should set tmux environment for session ID
+	if !strings.Contains(cmd, "tmux set-environment COPILOT_SESSION_ID copilot-session-xyz") {
+		t.Errorf("resume command should set COPILOT_SESSION_ID in tmux env, got: %s", cmd)
+	}
+}
+
+func TestBuildCopilotCommand_WithOptions(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	tmpDir := t.TempDir()
+	os.Setenv("HOME", tmpDir)
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	inst := NewInstanceWithTool("test", "/tmp/test", "copilot")
+	err := inst.SetCopilotOptions(&CopilotOptions{
+		Model:     "gpt-4o",
+		Agent:     "coder",
+		YoloMode:  boolPtr(true),
+		ConfigDir: "/tmp/copilot-cfg",
+	})
+	if err != nil {
+		t.Fatalf("SetCopilotOptions failed: %v", err)
+	}
+
+	cmd := inst.buildCopilotCommand("copilot")
+
+	if !strings.Contains(cmd, "--model gpt-4o") {
+		t.Errorf("expected --model gpt-4o, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--agent coder") {
+		t.Errorf("expected --agent coder, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--yolo") {
+		t.Errorf("expected --yolo, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "--config-dir /tmp/copilot-cfg") {
+		t.Errorf("expected --config-dir /tmp/copilot-cfg, got: %s", cmd)
+	}
+}
+
+func TestBuildCopilotCommand_CustomCommand(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		ClearUserConfigCache()
+	}()
+
+	inst := NewInstanceWithTool("test", "/tmp/test", "copilot")
+
+	// Custom commands pass through with env prefix
+	cmd := inst.buildCopilotCommand("copilot --some-flag")
+	if !strings.Contains(cmd, "copilot --some-flag") {
+		t.Errorf("custom command should be preserved, got: %s", cmd)
+	}
+	// Env vars should still be set
+	if !strings.Contains(cmd, "AGENTDECK_TOOL=copilot") {
+		t.Errorf("expected AGENTDECK_TOOL env even for custom command, got: %s", cmd)
+	}
+}
+
+func TestBuildCopilotCommand_NonCopilotTool(t *testing.T) {
+	inst := NewInstance("shell-test", "/tmp/test")
+	cmd := inst.buildCopilotCommand("bash")
+	if cmd != "bash" {
+		t.Errorf("non-copilot command should not be modified, got: %s", cmd)
+	}
+}
+
+func TestGetSetCopilotOptions(t *testing.T) {
+	inst := NewInstanceWithTool("test", "/tmp/test", "copilot")
+
+	// Initially nil
+	if opts := inst.GetCopilotOptions(); opts != nil {
+		t.Errorf("expected nil initial options, got %+v", opts)
+	}
+
+	// Set options
+	original := &CopilotOptions{
+		SessionMode:     "resume",
+		ResumeSessionID: "copilot-sess-123",
+		Model:           "gpt-4o",
+		Agent:           "coder",
+		YoloMode:        boolPtr(true),
+		ConfigDir:       "/tmp/copilot-cfg",
+	}
+	if err := inst.SetCopilotOptions(original); err != nil {
+		t.Fatalf("SetCopilotOptions failed: %v", err)
+	}
+
+	// Get options back
+	restored := inst.GetCopilotOptions()
+	if restored == nil {
+		t.Fatal("expected non-nil options after SetCopilotOptions")
+	}
+	if restored.SessionMode != original.SessionMode {
+		t.Errorf("SessionMode: got %q, want %q", restored.SessionMode, original.SessionMode)
+	}
+	if restored.ResumeSessionID != original.ResumeSessionID {
+		t.Errorf("ResumeSessionID: got %q, want %q", restored.ResumeSessionID, original.ResumeSessionID)
+	}
+	if restored.Model != original.Model {
+		t.Errorf("Model: got %q, want %q", restored.Model, original.Model)
+	}
+	if restored.Agent != original.Agent {
+		t.Errorf("Agent: got %q, want %q", restored.Agent, original.Agent)
+	}
+	if restored.YoloMode == nil || !*restored.YoloMode {
+		t.Error("expected YoloMode=true after roundtrip")
+	}
+	if restored.ConfigDir != original.ConfigDir {
+		t.Errorf("ConfigDir: got %q, want %q", restored.ConfigDir, original.ConfigDir)
+	}
+
+	// Set nil clears
+	if err := inst.SetCopilotOptions(nil); err != nil {
+		t.Fatalf("SetCopilotOptions(nil) failed: %v", err)
+	}
+	if opts := inst.GetCopilotOptions(); opts != nil {
+		t.Errorf("expected nil after clearing, got %+v", opts)
+	}
+}

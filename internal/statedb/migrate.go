@@ -48,6 +48,9 @@ type jsonInstanceData struct {
 	CodexSessionID  string    `json:"codex_session_id,omitempty"`
 	CodexDetectedAt time.Time `json:"codex_detected_at,omitempty"`
 
+	CopilotSessionID  string    `json:"copilot_session_id,omitempty"`
+	CopilotDetectedAt time.Time `json:"copilot_detected_at,omitempty"`
+
 	LatestPrompt    string          `json:"latest_prompt,omitempty"`
 	ToolOptionsJSON json.RawMessage `json:"tool_options,omitempty"`
 	LoadedMCPNames  []string        `json:"loaded_mcp_names,omitempty"`
@@ -74,6 +77,8 @@ type toolDataBlob struct {
 	OpenCodeDetectedAt int64           `json:"opencode_detected_at,omitempty"`
 	CodexSessionID     string          `json:"codex_session_id,omitempty"`
 	CodexDetectedAt    int64           `json:"codex_detected_at,omitempty"`
+	CopilotSessionID   string          `json:"copilot_session_id,omitempty"`
+	CopilotDetectedAt  int64           `json:"copilot_detected_at,omitempty"`
 	LatestPrompt       string          `json:"latest_prompt,omitempty"`
 	LoadedMCPNames     []string        `json:"loaded_mcp_names,omitempty"`
 	ToolOptions        json.RawMessage `json:"tool_options,omitempty"`
@@ -102,6 +107,7 @@ func MigrateFromJSON(jsonPath string, db *StateDB) (int, int, error) {
 			GeminiModel:       inst.GeminiModel,
 			OpenCodeSessionID: inst.OpenCodeSessionID,
 			CodexSessionID:    inst.CodexSessionID,
+			CopilotSessionID:  inst.CopilotSessionID,
 			LatestPrompt:      inst.LatestPrompt,
 			LoadedMCPNames:    inst.LoadedMCPNames,
 			ToolOptions:       inst.ToolOptionsJSON,
@@ -117,6 +123,9 @@ func MigrateFromJSON(jsonPath string, db *StateDB) (int, int, error) {
 		}
 		if !inst.CodexDetectedAt.IsZero() {
 			td.CodexDetectedAt = inst.CodexDetectedAt.Unix()
+		}
+		if !inst.CopilotDetectedAt.IsZero() {
+			td.CopilotDetectedAt = inst.CopilotDetectedAt.Unix()
 		}
 
 		tdJSON, err := json.Marshal(td)
@@ -178,6 +187,7 @@ func MarshalToolData(
 	geminiYoloMode *bool, geminiModel string,
 	openCodeSessionID string, openCodeDetectedAt time.Time,
 	codexSessionID string, codexDetectedAt time.Time,
+	copilotSessionID string, copilotDetectedAt time.Time,
 	latestPrompt string, loadedMCPNames []string,
 	toolOptionsJSON json.RawMessage,
 ) json.RawMessage {
@@ -188,6 +198,7 @@ func MarshalToolData(
 		GeminiModel:       geminiModel,
 		OpenCodeSessionID: openCodeSessionID,
 		CodexSessionID:    codexSessionID,
+		CopilotSessionID:  copilotSessionID,
 		LatestPrompt:      latestPrompt,
 		LoadedMCPNames:    loadedMCPNames,
 		ToolOptions:       toolOptionsJSON,
@@ -204,6 +215,9 @@ func MarshalToolData(
 	if !codexDetectedAt.IsZero() {
 		td.CodexDetectedAt = codexDetectedAt.Unix()
 	}
+	if !copilotDetectedAt.IsZero() {
+		td.CopilotDetectedAt = copilotDetectedAt.Unix()
+	}
 	data, _ := json.Marshal(td)
 	return data
 }
@@ -216,6 +230,7 @@ func UnmarshalToolData(data json.RawMessage) (
 	geminiYoloMode *bool, geminiModel string,
 	openCodeSessionID string, openCodeDetectedAt time.Time,
 	codexSessionID string, codexDetectedAt time.Time,
+	copilotSessionID string, copilotDetectedAt time.Time,
 	latestPrompt string, loadedMCPNames []string,
 	toolOptionsJSON json.RawMessage,
 ) {
@@ -243,6 +258,10 @@ func UnmarshalToolData(data json.RawMessage) (
 	codexSessionID = td.CodexSessionID
 	if td.CodexDetectedAt > 0 {
 		codexDetectedAt = time.Unix(td.CodexDetectedAt, 0)
+	}
+	copilotSessionID = td.CopilotSessionID
+	if td.CopilotDetectedAt > 0 {
+		copilotDetectedAt = time.Unix(td.CopilotDetectedAt, 0)
 	}
 	latestPrompt = td.LatestPrompt
 	loadedMCPNames = td.LoadedMCPNames

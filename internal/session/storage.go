@@ -73,6 +73,10 @@ type InstanceData struct {
 	CodexSessionID  string    `json:"codex_session_id,omitempty"`
 	CodexDetectedAt time.Time `json:"codex_detected_at,omitempty"`
 
+	// Copilot session (persisted for resume after app restart)
+	CopilotSessionID  string    `json:"copilot_session_id,omitempty"`
+	CopilotDetectedAt time.Time `json:"copilot_detected_at,omitempty"`
+
 	// Latest user input for context
 	LatestPrompt string `json:"latest_prompt,omitempty"`
 
@@ -260,6 +264,7 @@ func (s *Storage) SaveWithGroups(instances []*Instance, groupTree *GroupTree) er
 			inst.GeminiYoloMode, inst.GeminiModel,
 			inst.OpenCodeSessionID, inst.OpenCodeDetectedAt,
 			inst.CodexSessionID, inst.CodexDetectedAt,
+			inst.CopilotSessionID, inst.CopilotDetectedAt,
 			inst.LatestPrompt, inst.LoadedMCPNames,
 			inst.ToolOptionsJSON,
 		)
@@ -400,6 +405,7 @@ func (s *Storage) LoadLite() ([]*InstanceData, []*GroupData, error) {
 			geminiYolo, geminiModel,
 			opencodeSID, opencodeAt,
 			codexSID, codexAt,
+			copilotSID, copilotAt,
 			latestPrompt, loadedMCPs,
 			toolOpts := statedb.UnmarshalToolData(r.ToolData)
 
@@ -430,6 +436,8 @@ func (s *Storage) LoadLite() ([]*InstanceData, []*GroupData, error) {
 			OpenCodeDetectedAt: opencodeAt,
 			CodexSessionID:     codexSID,
 			CodexDetectedAt:    codexAt,
+			CopilotSessionID:   copilotSID,
+			CopilotDetectedAt:  copilotAt,
 			LatestPrompt:       latestPrompt,
 			ToolOptionsJSON:    toolOpts,
 			LoadedMCPNames:     loadedMCPs,
@@ -482,6 +490,7 @@ func (s *Storage) LoadWithGroups() ([]*Instance, []*GroupData, error) {
 			geminiYolo, geminiModel,
 			opencodeSID, opencodeAt,
 			codexSID, codexAt,
+			copilotSID, copilotAt,
 			latestPrompt, loadedMCPs,
 			toolOpts := statedb.UnmarshalToolData(r.ToolData)
 
@@ -512,6 +521,8 @@ func (s *Storage) LoadWithGroups() ([]*Instance, []*GroupData, error) {
 			OpenCodeDetectedAt: opencodeAt,
 			CodexSessionID:     codexSID,
 			CodexDetectedAt:    codexAt,
+			CopilotSessionID:   copilotSID,
+			CopilotDetectedAt:  copilotAt,
 			LatestPrompt:       latestPrompt,
 			ToolOptionsJSON:    toolOpts,
 			LoadedMCPNames:     loadedMCPs,
@@ -705,6 +716,8 @@ func (s *Storage) convertToInstances(data *StorageData) ([]*Instance, []*GroupDa
 			OpenCodeDetectedAt: instData.OpenCodeDetectedAt,
 			CodexSessionID:     instData.CodexSessionID,
 			CodexDetectedAt:    instData.CodexDetectedAt,
+			CopilotSessionID:   instData.CopilotSessionID,
+			CopilotDetectedAt:  instData.CopilotDetectedAt,
 			ToolOptionsJSON:    instData.ToolOptionsJSON,
 			LatestPrompt:       instData.LatestPrompt,
 			LoadedMCPNames:     instData.LoadedMCPNames,
