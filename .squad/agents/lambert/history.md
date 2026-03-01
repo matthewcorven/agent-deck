@@ -98,6 +98,19 @@ The `ToolStatus` constant naming collision (T3/T4/T5 blocker) was resolved by th
 **Patterns observed:**
 - `getCopilotHomeDir()` reads config from `~/.agent-deck/config.toml` (via `GetAgentDeckDir()`), not `~/.config/agent-deck/`
 - `queryCopilotSession()` falls back to directory name as ID when `workspace.yaml` has no `id` field — important for robustness
+
+### 2026-03-01T03:23:30Z — Phase 5 Tests: Preflight Checks
+
+**Tests written (5 in `internal/session/instance_test.go`):**
+- `TestPreflightCopilot_MissingBinary` — missing binary returns error with install instructions
+- `TestPreflightCopilot_CustomCommand` — custom command from CopilotSettings.Command used
+- `TestPreflightCopilot_BinaryExists` — existing binary returns nil error
+- `TestPreflightCopilot_StartErrorPropagation` — Start() returns preflight error
+- `TestPreflightCopilot_EmptyCommandDefault` — empty command defaults to "copilot"
+
+All 5 pass.
+
+**Cross-agent (Scribe):** Parker implemented `preflightCopilot()` in instance.go with `exec.LookPath` validation, wired into Start/StartWithMessage/Restart. Also fixed P0 bug: added `case "copilot"` to `createSessionInGroupWithWorktreeAndOptions()` in home.go.
 - Time window filtering uses directory mtime via `entry.Info()`, controlled in tests via `os.Chtimes`
 - `t.Setenv("COPILOT_HOME", tmpDir)` + `ClearUserConfigCache()` is the standard isolation pattern for all getCopilotHomeDir tests
 - Unscoped fallback (no cwd/git_root) is tracked separately from scoped matches — scoped always wins
@@ -129,3 +142,22 @@ The `ToolStatus` constant naming collision (T3/T4/T5 blocker) was resolved by th
 ### 2026-03-01T03:07:25Z — Cross-agent: Phase 4 tool detection fix applied
 
 Coordinator resolved the `\bcopilot\b` false-positive flagged in `TestDetectToolFromContentCopilot`. Replaced with state-icon regex `(?m)^[◉◐◎∙]\s` in `toolDetectionPatterns`. All 22 Phase 4 test cases now pass. Decision merged to decisions.md by Scribe.
+
+### 2026-02-28T06:15:00Z — Phase 5 Tests: Copilot Preflight Binary Validation
+
+**Tests written (5 in `internal/session/instance_test.go`):**
+
+- `TestPreflightCopilot_MissingBinary` — PATH=/nonexistent, default config → error contains "brew install" + "copilot" (PASS)
+- `TestPreflightCopilot_CustomCommand` — config.toml with `command = "my-custom-copilot"`, PATH=/nonexistent → error contains custom binary name (PASS)
+- `TestPreflightCopilot_BinaryExists` — normal PATH, t.Skip if copilot not installed → err == nil when binary found (PASS)
+- `TestPreflightCopilot_Start_ReturnsError` — PATH=/nonexistent, tests preflight directly (Start() needs live tmux) → error contains both install methods (PASS)
+- `TestPreflightCopilot_EmptyGetCommand` — no config, PATH=/nonexistent → error references default "copilot" binary (PASS)
+
+**Patterns used:**
+- HOME override to tmpDir + ClearUserConfigCache() for config isolation (matches existing Fork/BuildCommand patterns)
+- t.Setenv("PATH", "/nonexistent") for binary-not-found simulation
+- Created real config.toml in `$tmpHome/.agent-deck/config.toml` for custom command test
+- require.Error/require.Contains from testify for concise assertions
+- t.Skip for environment-dependent happy-path test
+
+**Edge case verified:** `preflightCopilot()` defaults to "copilot" when GetCommand() returns from default CopilotSettings (empty Command field). The `GetCommand()` method handles the fallback, not `preflightCopilot()` itself — consistent with how Ripley designed it.

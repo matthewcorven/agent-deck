@@ -81,6 +81,24 @@ type StatusProvider interface {
 
 ---
 
+### 2026-03-01: Phase 5 Preflight — Standalone Function in instance.go, Generalizable Pattern
+
+**By:** Ripley (Lead)
+**Status:** Decided
+**What:** Copilot preflight check will be a standalone `preflightCopilot(command string) error` function in `instance.go`, called at the top of both `Start()` and `StartWithMessage()` before the command builder switch. The function uses `exec.LookPath` with the resolved command from `CopilotSettings.GetCommand()`. Error message includes `brew install copilot-cli` and `npm install -g @github/copilot` install methods. The missing `case "copilot"` in `createSessionInGroupWithWorktreeAndOptions()` (home.go ~L5156) must also be added — this was missed in Phase 1. Settings panel Task D is deferred: the panel has no per-tool prerequisite pattern, and adding one for just Copilot would be inconsistent.
+**Why:** A standalone function is reusable — when other tools need preflight checks (e.g., verifying `opencode` or `codex` binaries), the pattern is already established. Keeping it in `instance.go` (not a separate module) follows the project's convention: all tool-specific lifecycle logic lives in instance.go. The UI `case "copilot"` omission means Copilot sessions created via the new-session dialog get `tool = "shell"` instead of `tool = "copilot"`, which breaks status detection, command building, and session resume. This is a P0 bug fix, not Phase 5 scope, but must ship with it.
+
+---
+
+### 2026-03-01: Phase 5 Preflight — Implementation Complete
+
+**By:** Parker (Integration Dev)
+**Status:** Completed
+**What:** Implemented Phase 5 preflight checks per Ripley's approved execution plan. `preflightCopilot()` method added to Instance in `instance.go`. Preflight gate inserted in `Start()`, `StartWithMessage()`, and `Restart()`. Missing `case "copilot"` added to `createSessionInGroupWithWorktreeAndOptions()` in `home.go`. npm package correctly set to `@github/copilot` (not `@anthropic-ai/copilot` as noted in Ripley's design doc — corrected per plan). Clean build and vet.
+**Why:** Users without the Copilot CLI installed now get actionable install instructions instead of a cryptic tmux failure. The home.go fix ensures Copilot sessions created via the new-session dialog are properly identified as `tool = "copilot"` for status detection, command building, and resume.
+
+---
+
 ### 2026-02-25: Copilot CLI Session ID Strategy — Filesystem Detection via workspace.yaml
 
 **By:** Ripley (Lead)

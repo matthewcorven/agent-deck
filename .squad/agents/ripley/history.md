@@ -174,6 +174,32 @@ Verified Phase 2 doc (`phase-2-command-builder.md`) against current codebase. Fo
 
 **Findings updated:** `docs/plans/copilot-cli-captures/findings.md` — §6 revised, §7 updated, §8 appended.
 
+### 2026-03-01 — Phase 5 Preflight Design Review & Execution Plan
+
+Verified Phase 5 design doc against current codebase. Key findings:
+
+**Line number verification:**
+- `Start()` is at line 1745 (not referenced in doc by line, OK)
+- `StartWithMessage()` is at line 1843
+- `buildCopilotCommand()` is at line 726
+- `createSessionInGroupWithWorktreeAndOptions()` is at line 5115 (tool switch at ~5156)
+- `Restart()` has copilot handling at lines 3891 and 3908
+
+**Missing `case "copilot"` in home.go UI tool switch (P0 bug):** The switch at line ~5156 handles claude/gemini/aider/codex/opencode but NOT copilot. Sessions created via the new-session dialog with command="copilot" fall through to the custom tool check, which returns nil (no ToolDef for "copilot"), so the raw command is used and `tool` stays "shell". This breaks status detection, command building, resume, and session options. Missed in Phase 1. Must fix.
+
+**Architectural decision: standalone `preflightCopilot()` function in instance.go.** Reasons:
+1. Reusable pattern for future tool preflight checks
+2. Follows project convention — all tool lifecycle logic in instance.go
+3. No justification for a separate preflight module at this scope
+4. Uses `exec.LookPath` with resolved command from `CopilotSettings.GetCommand()`
+5. Error includes brew + npm install methods
+
+**Settings panel (Task D): Deferred.** Panel has no per-tool prerequisite display. Sections are: Theme, Default Tool, Claude, Gemini, Codex, Updates, Logs, Global Search, Preview, Maintenance, MCP Servers & Custom Tools. Adding a Copilot section with just a prerequisite note would be inconsistent. Revisit when Copilot gets a settings-worthy option (e.g., YoloMode toggle).
+
+**Error propagation path confirmed:** `Start()` returns error → `sessionCreatedMsg{err: err}` in UI → `h.setError(msg.err)` in home.go Update handler → displayed in TUI footer. The preflight error will surface cleanly through this existing path.
+
+**Restart() also needs preflight:** `Restart()` at line 3607 calls `buildCopilotCommand()` at lines 3891/3908. If a user deletes the copilot binary between sessions, restart will fail cryptically. Same preflight check should guard restart.
+
 ### 2026-02-28 — Upstream Review #2 (v0.19.14 → v0.19.19, 32 commits, 180 files)
 
 Full deep review of upstream divergence. 5 version bumps (v0.19.15–v0.19.19). Major new subsystems and API changes documented below.

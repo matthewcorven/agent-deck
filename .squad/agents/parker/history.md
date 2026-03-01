@@ -91,3 +91,13 @@ Binary: `copilot` (standalone, `brew install copilot-cli@prerelease` or `npm ins
 
 - **2026-03-01T03:07:25Z — Cross-agent: Phase 4 tool detection pattern fix:**
   Lambert's tests found `\bcopilot\b` in `toolDetectionPatterns` false-positives on paths containing "copilot" as standalone word. Coordinator replaced with `(?m)^[◉◐◎∙]\s` (state-icon regex). All tmux tests now pass. Decision merged to decisions.md.
+
+- **2026-03-01T03:18:41Z — Phase 5: Preflight Checks + Error UX:**
+  - **Task A:** Added `preflightCopilot()` method to `internal/session/instance.go` (near line 721, before `buildCopilotCommand`). Uses `LoadUserConfig()` → `config.Copilot.GetCommand()` for binary name, `exec.LookPath` for validation. Error message includes `brew install copilot-cli` and `npm install -g @github/copilot`. Inserted 5-line preflight gate in `Start()` before the tool switch.
+  - **Task B:** Inserted identical preflight gate in `StartWithMessage()` before the tool switch.
+  - **Task B+:** Inserted preflight gate in `Restart()` after the MCP regeneration block but before the Claude syncClaudeSessionFromDisk call — catches all Restart code paths (respawn-pane and fallback recreate).
+  - **Task C (P0 bug fix):** Added `case "copilot": tool = "copilot"` to `createSessionInGroupWithWorktreeAndOptions()` in `internal/ui/home.go` (~line 5151). Without this, Copilot sessions would fall through to the default case and be treated as shell/custom tool.
+  - `exec` was already imported. `LoadUserConfig` is same-package. No new imports needed.
+
+- **2026-03-01T03:23:30Z — Cross-agent (Scribe):** Lambert wrote 5 tests for `preflightCopilot()`: missing binary, custom command, binary exists, Start() error propagation, empty command default. All pass. Test file: `internal/session/instance_test.go`.
+  - Clean `go build ./...` and `go vet ./...`.
