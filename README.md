@@ -56,7 +56,7 @@ https://github.com/user-attachments/assets/e4f55917-435c-45ba-92cc-89737d0d1401
 
 ## The Problem
 
-Running Claude Code on 10 projects? OpenCode on 5 more? Another agent somewhere in the background?
+Running Claude Code on 10 projects? Copilot on 5 more? OpenCode and Codex in the background?
 
 **Managing multiple AI sessions gets messy fast.** Too many terminal tabs. Hard to track what's running, what's waiting, what's done. Switching between projects means hunting through windows.
 
@@ -267,6 +267,7 @@ Agent Deck works with any terminal-based AI tool:
 | **Claude Code** | Full (status, MCP, fork, resume) |
 | **Gemini CLI** | Full (status, MCP, resume) |
 | **OpenCode** | Status detection, organization |
+| **Copilot CLI** | Status detection, session resume, config |
 | **Codex** | Status detection, organization |
 | **Cursor** (terminal) | Status detection, organization |
 | **Custom tools** | Configurable via `[tools.*]` in config.toml |

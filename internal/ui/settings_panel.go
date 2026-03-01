@@ -164,7 +164,7 @@ func (s *SettingsPanel) LoadConfig(config *session.UserConfig) {
 	}
 
 	// Default tool
-	s.selectedTool = 4 // None by default
+	s.selectedTool = len(toolValues) - 1 // None (last entry) by default
 	for i, val := range toolValues {
 		if val == config.DefaultTool {
 			s.selectedTool = i

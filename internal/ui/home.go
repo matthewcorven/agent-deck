@@ -5148,6 +5148,8 @@ func (h *Home) createSessionInGroupWithWorktreeAndOptions(
 			tool = "codex"
 		case "opencode":
 			tool = "opencode"
+		case "copilot":
+			tool = "copilot"
 		default:
 			// Check custom tools: tool identity stays as the custom name (e.g. "glm")
 			// so config lookup works, but command resolves to the actual binary (e.g. "claude")
@@ -8110,9 +8112,21 @@ func (h *Home) renderPreviewPane(width, height int) string {
 		}
 	}
 
+	// Copilot-specific info (session ID, detection)
+	if selected.Tool == "copilot" {
+		copilotHeader := renderSectionDivider("Copilot", width-4)
+		b.WriteString(copilotHeader)
+		b.WriteString("\n")
+
+		renderToolStatusLine(&b, selected.CopilotSessionID, selected.CopilotDetectedAt, true)
+		if selected.CopilotSessionID != "" {
+			renderDetectedAtLine(&b, selected.CopilotDetectedAt)
+		}
+	}
+
 	// Custom tool info (tools defined in config.toml that aren't built-in)
 	if selected.Tool != "claude" && selected.Tool != "gemini" && selected.Tool != "opencode" &&
-		selected.Tool != "codex" {
+		selected.Tool != "codex" && selected.Tool != "copilot" {
 		if toolDef := session.GetToolDef(selected.Tool); toolDef != nil {
 			toolName := selected.Tool
 			if toolDef.Icon != "" {

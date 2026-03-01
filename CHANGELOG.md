@@ -5,6 +5,14 @@ All notable changes to Agent Deck will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-03-01
+
+### Added
+
+- GitHub Copilot CLI (`copilot`) as a first-class tool: selectable in New Session / Fork / Setup Wizard, session resume via `--resume` / `--continue`, status detection (busy/idle patterns), config support (`[copilot]` section in config.toml), and preflight binary checks with install guidance.
+- Copilot session details in TUI: session ID, detection timestamp, connected status.
+- Copilot troubleshooting section in troubleshooting guide.
+
 ## [0.19.19] - 2026-02-26
 
 ### Fixed

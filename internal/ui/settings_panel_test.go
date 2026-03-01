@@ -141,8 +141,9 @@ func TestSettingsPanel_LoadConfig_DefaultTool(t *testing.T) {
 		{"gemini", "gemini", 1},
 		{"opencode", "opencode", 2},
 		{"codex", "codex", 3},
-		{"empty", "", 4}, // None
-		{"unknown", "unknown-tool", 4},
+		{"copilot", "copilot", 4},
+		{"empty", "", 5}, // None
+		{"unknown", "unknown-tool", 5},
 	}
 
 	for _, tt := range tests {
@@ -302,7 +303,8 @@ func TestSettingsPanel_GetConfig_ToolMapping(t *testing.T) {
 		{"gemini", 1, "gemini"},
 		{"opencode", 2, "opencode"},
 		{"codex", 3, "codex"},
-		{"none", 4, ""},
+		{"copilot", 4, "copilot"},
+		{"none", 5, ""},
 	}
 
 	for _, tt := range tests {

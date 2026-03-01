@@ -12,6 +12,7 @@ Common issues and solutions for agent-deck.
 | Flag not working | Put flags BEFORE arguments |
 | Fork fails | Check session has valid Claude session ID |
 | Status stuck | Wait 2 seconds or press `u` to mark unread |
+| Copilot not found | Install: `brew install copilot-cli@prerelease` or `npm install -g @github/copilot` |
 
 ## Common Issues
 
@@ -69,6 +70,16 @@ If you use multiple profiles, set the same under the profile override:
 [profiles.work.claude]
 allow_dangerous_mode = true
 ```
+
+### Copilot CLI Issues
+
+| Issue | Solution |
+|-------|----------|
+| `copilot: command not found` | Install: `brew install copilot-cli@prerelease` or `npm install -g @github/copilot` |
+| Auth expired / not logged in | Run `copilot` and use `/login`, or set `GH_TOKEN` env var |
+| Session resume fails | Try `copilot --continue` manually; check `~/.copilot/` for session data |
+| Status bar not updating | Verify patterns match Copilot's output; check `config.toml` for pattern overrides |
+| Model not available | Check `copilot /usage` for available models; verify `--model` flag spelling |
 
 ### High CPU Usage
 
