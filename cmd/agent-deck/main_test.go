@@ -177,3 +177,24 @@ func TestIsDuplicateSession(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectToolRecognizesCopilotAndPi(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want string
+	}{
+		{name: "copilot", cmd: "copilot", want: "copilot"},
+		{name: "copilot with args", cmd: "copilot --resume abc123", want: "copilot"},
+		{name: "pi", cmd: "pi --model fast", want: "pi"},
+		{name: "shell fallback", cmd: "bash -lc 'echo hi'", want: "shell"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := detectTool(tt.cmd); got != tt.want {
+				t.Fatalf("detectTool(%q) = %q, want %q", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}

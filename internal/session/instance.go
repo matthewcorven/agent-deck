@@ -1901,8 +1901,11 @@ func (i *Instance) UpdateCopilotSession() {
 		}
 	}
 
-	// 2. Filesystem fallback: detect session from workspace.yaml if tmux env is empty
-	if i.CopilotSessionID == "" && i.CopilotStartedAt > 0 {
+	// 2. Filesystem fallback: detect session from workspace.yaml if tmux env is empty.
+	// Do not require CopilotStartedAt here because that timestamp is transient and
+	// not persisted across reloads; queryCopilotSession already applies project-path
+	// matching and only uses CopilotStartedAt when it is available.
+	if i.CopilotSessionID == "" {
 		if sessionID := i.queryCopilotSession(i.collectOtherCopilotSessionIDs(), false); sessionID != "" {
 			changed := sessionID != i.CopilotSessionID
 			if changed {

@@ -2943,6 +2943,29 @@ func TestQueryCopilotSession_EmptyDirectory(t *testing.T) {
 	}
 }
 
+func TestUpdateCopilotSession_DetectsWithoutStartedAt(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("COPILOT_HOME", tmpDir)
+	t.Setenv("HOME", t.TempDir())
+	ClearUserConfigCache()
+
+	projectPath := filepath.Join(t.TempDir(), "copilot-project")
+	require.NoError(t, os.MkdirAll(projectPath, 0o755))
+	createTempWorkspaceYAML(t, tmpDir, "uuid-reload-detect", projectPath, projectPath)
+
+	inst := NewInstanceWithTool("copilot-reload", projectPath, "copilot")
+	inst.CopilotStartedAt = 0
+
+	inst.UpdateCopilotSession()
+
+	if inst.CopilotSessionID != "uuid-reload-detect" {
+		t.Fatalf("CopilotSessionID = %q, want %q", inst.CopilotSessionID, "uuid-reload-detect")
+	}
+	if inst.CopilotDetectedAt.IsZero() {
+		t.Fatal("CopilotDetectedAt should be set after detection")
+	}
+}
+
 func TestQueryCopilotSession_CorruptYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("COPILOT_HOME", tmpDir)
