@@ -79,12 +79,17 @@ type InstanceData struct {
 
 	// Latest user input for context
 	LatestPrompt string `json:"latest_prompt,omitempty"`
+	Notes        string `json:"notes,omitempty"`
 
 	// Tool-specific launch options (generic for all tools: claude, codex, etc.)
 	ToolOptionsJSON json.RawMessage `json:"tool_options,omitempty"`
 
 	// MCP tracking (persisted for sync status display)
 	LoadedMCPNames []string `json:"loaded_mcp_names,omitempty"`
+
+	// SSH remote support
+	SSHHost       string `json:"ssh_host,omitempty"`
+	SSHRemotePath string `json:"ssh_remote_path,omitempty"`
 }
 
 // GroupData represents serializable group data
@@ -265,8 +270,9 @@ func (s *Storage) SaveWithGroups(instances []*Instance, groupTree *GroupTree) er
 			inst.OpenCodeSessionID, inst.OpenCodeDetectedAt,
 			inst.CodexSessionID, inst.CodexDetectedAt,
 			inst.CopilotSessionID, inst.CopilotDetectedAt,
-			inst.LatestPrompt, inst.LoadedMCPNames,
+			inst.LatestPrompt, inst.Notes, inst.LoadedMCPNames,
 			inst.ToolOptionsJSON,
+			inst.SSHHost, inst.SSHRemotePath,
 		)
 
 		rows[i] = &statedb.InstanceRow{
@@ -406,8 +412,9 @@ func (s *Storage) LoadLite() ([]*InstanceData, []*GroupData, error) {
 			opencodeSID, opencodeAt,
 			codexSID, codexAt,
 			copilotSID, copilotAt,
-			latestPrompt, loadedMCPs,
-			toolOpts := statedb.UnmarshalToolData(r.ToolData)
+			latestPrompt, notes, loadedMCPs,
+			toolOpts,
+			sshHost2, sshRemotePath2 := statedb.UnmarshalToolData(r.ToolData)
 
 		instances[i] = &InstanceData{
 			ID:                 r.ID,
@@ -439,8 +446,11 @@ func (s *Storage) LoadLite() ([]*InstanceData, []*GroupData, error) {
 			CopilotSessionID:   copilotSID,
 			CopilotDetectedAt:  copilotAt,
 			LatestPrompt:       latestPrompt,
+			Notes:              notes,
 			ToolOptionsJSON:    toolOpts,
 			LoadedMCPNames:     loadedMCPs,
+			SSHHost:            sshHost2,
+			SSHRemotePath:      sshRemotePath2,
 		}
 	}
 
@@ -491,8 +501,9 @@ func (s *Storage) LoadWithGroups() ([]*Instance, []*GroupData, error) {
 			opencodeSID, opencodeAt,
 			codexSID, codexAt,
 			copilotSID, copilotAt,
-			latestPrompt, loadedMCPs,
-			toolOpts := statedb.UnmarshalToolData(r.ToolData)
+			latestPrompt, notes, loadedMCPs,
+			toolOpts,
+			sshHost, sshRemotePath := statedb.UnmarshalToolData(r.ToolData)
 
 		data.Instances[i] = &InstanceData{
 			ID:                 r.ID,
@@ -524,8 +535,11 @@ func (s *Storage) LoadWithGroups() ([]*Instance, []*GroupData, error) {
 			CopilotSessionID:   copilotSID,
 			CopilotDetectedAt:  copilotAt,
 			LatestPrompt:       latestPrompt,
+			Notes:              notes,
 			ToolOptionsJSON:    toolOpts,
 			LoadedMCPNames:     loadedMCPs,
+			SSHHost:            sshHost,
+			SSHRemotePath:      sshRemotePath,
 		}
 	}
 
@@ -720,7 +734,10 @@ func (s *Storage) convertToInstances(data *StorageData) ([]*Instance, []*GroupDa
 			CopilotDetectedAt:  instData.CopilotDetectedAt,
 			ToolOptionsJSON:    instData.ToolOptionsJSON,
 			LatestPrompt:       instData.LatestPrompt,
+			Notes:              instData.Notes,
 			LoadedMCPNames:     instData.LoadedMCPNames,
+			SSHHost:            instData.SSHHost,
+			SSHRemotePath:      instData.SSHRemotePath,
 			tmuxSession:        tmuxSess,
 		}
 

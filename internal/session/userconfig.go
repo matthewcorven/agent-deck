@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/BurntSushi/toml"
@@ -22,9 +23,14 @@ const UserConfigFileName = "config.toml"
 // UserConfig represents user-facing configuration in TOML format
 type UserConfig struct {
 	// DefaultTool is the pre-selected AI tool when creating new sessions
-	// Valid values: "claude", "gemini", "opencode", "codex", "copilot", or any custom tool name
+	// Valid values: "claude", "gemini", "opencode", "codex", "copilot", "pi", or any custom tool name
 	// If empty or invalid, defaults to "shell" (no pre-selection)
 	DefaultTool string `toml:"default_tool"`
+
+	// Hotkeys overrides default keyboard shortcuts in the TUI.
+	// Keys are action names, values are key bindings (e.g., "delete" = "backspace").
+	// Set an action to "" to explicitly unbind it.
+	Hotkeys map[string]string `toml:"hotkeys"`
 
 	// Theme sets the color scheme: "dark" (default), "light", or "system"
 	Theme string `toml:"theme"`
@@ -111,6 +117,57 @@ type UserConfig struct {
 
 	// Docker defines Docker sandbox settings for containerized sessions
 	Docker DockerSettings `toml:"docker"`
+
+	// Remotes defines named SSH remote agent-deck instances
+	Remotes map[string]RemoteConfig `toml:"remotes"`
+
+	// OpenClaw defines OpenClaw gateway integration settings
+	OpenClaw OpenClawSettings `toml:"openclaw"`
+}
+
+// OpenClawSettings configures the OpenClaw gateway connection.
+type OpenClawSettings struct {
+	// GatewayURL is the WebSocket URL of the OpenClaw gateway (default: "ws://127.0.0.1:31337")
+	GatewayURL string `toml:"gateway_url"`
+
+	// Password is the gateway authentication password.
+	// Supports env var references (e.g. "$OPENCLAW_PASSWORD" or "${OPENCLAW_PASSWORD}").
+	// Falls back to OPENCLAW_PASSWORD env var if not set.
+	Password string `toml:"password"`
+
+	// AutoSync syncs OpenClaw agents as agent-deck sessions on TUI startup
+	AutoSync bool `toml:"auto_sync"`
+
+	// GroupName is the agent-deck group name for OpenClaw sessions (default: "openclaw")
+	GroupName string `toml:"group_name"`
+}
+
+// RemoteConfig defines a remote agent-deck instance accessible via SSH.
+type RemoteConfig struct {
+	// Host is the SSH destination (e.g., "user@host" or "user@host:port")
+	Host string `toml:"host"`
+
+	// AgentDeckPath is the path to agent-deck binary on the remote (default: "agent-deck")
+	AgentDeckPath string `toml:"agent_deck_path"`
+
+	// Profile is the remote profile to use (default: "default")
+	Profile string `toml:"profile"`
+}
+
+// GetAgentDeckPath returns the agent-deck binary path, defaulting to "agent-deck".
+func (rc RemoteConfig) GetAgentDeckPath() string {
+	if rc.AgentDeckPath != "" {
+		return rc.AgentDeckPath
+	}
+	return "agent-deck"
+}
+
+// GetProfile returns the remote profile, defaulting to "default".
+func (rc RemoteConfig) GetProfile() string {
+	if rc.Profile != "" {
+		return rc.Profile
+	}
+	return "default"
 }
 
 // ProfileSettings defines per-profile configuration overrides.
@@ -247,6 +304,11 @@ type PreviewSettings struct {
 
 	// Analytics configures which sections to show in the analytics panel
 	Analytics AnalyticsDisplaySettings `toml:"analytics"`
+
+	// NotesOutputSplit controls vertical space allocation between notes and output
+	// in the preview pane when output is visible.
+	// Range: 0.1 - 0.9 (fraction reserved for notes). Default: 0.33
+	NotesOutputSplit float64 `toml:"notes_output_split"`
 }
 
 // AnalyticsDisplaySettings configures which analytics sections to display
@@ -305,6 +367,11 @@ type InstanceSettings struct {
 	// When true (default), multiple instances can run, but only the first (primary) manages the notification bar
 	// When false, only one instance can run per profile
 	AllowMultiple *bool `toml:"allow_multiple"`
+
+	// FollowCwdOnAttach updates the session's ProjectPath from tmux pane_current_path
+	// after returning from attach, and persists the new path.
+	// Default: false
+	FollowCwdOnAttach *bool `toml:"follow_cwd_on_attach"`
 }
 
 // GetAllowMultiple returns whether multiple instances are allowed, defaulting to true
@@ -313,6 +380,14 @@ func (i *InstanceSettings) GetAllowMultiple() bool {
 		return true // Default: allow multiple instances (better UX for multi-pane workflows)
 	}
 	return *i.AllowMultiple
+}
+
+// GetFollowCwdOnAttach returns whether attach-return CWD follow is enabled.
+func (i *InstanceSettings) GetFollowCwdOnAttach() bool {
+	if i.FollowCwdOnAttach == nil {
+		return false
+	}
+	return *i.FollowCwdOnAttach
 }
 
 // ShellSettings defines shell environment configuration for sessions
@@ -360,6 +435,20 @@ func (p *PreviewSettings) GetShowOutput() bool {
 // GetAnalyticsSettings returns the analytics display settings with defaults applied
 func (p *PreviewSettings) GetAnalyticsSettings() AnalyticsDisplaySettings {
 	return p.Analytics
+}
+
+// GetNotesOutputSplit returns notes/output split ratio, clamped to sane bounds.
+func (p *PreviewSettings) GetNotesOutputSplit() float64 {
+	if p.NotesOutputSplit <= 0 {
+		return 0.33
+	}
+	if p.NotesOutputSplit < 0.1 {
+		return 0.1
+	}
+	if p.NotesOutputSplit > 0.9 {
+		return 0.9
+	}
+	return p.NotesOutputSplit
 }
 
 // GetShowContextBar returns whether to show context bar, defaulting to true
@@ -556,10 +645,19 @@ type WorktreeSettings struct {
 	DefaultLocation string `toml:"default_location"`
 
 	// PathTemplate: custom path template for worktree location.
-	// Variables: {repo-name}, {repo-root}, {branch}, {session-id}
+	// Variables:
+	//   {repo-name}, {repo-root}, {session-id}
+	//   {branch}         -> sanitized (human-friendly, may collide)
+	//   {branch-escaped} -> URL-escaped (collision-resistant, reversible)
 	// Unknown variables like {foo} are left as-is in the path.
 	// If set, overrides DefaultLocation.
 	PathTemplate *string `toml:"path_template"`
+
+	// BranchPrefix is the prefix for auto-generated branch names when creating
+	// worktree sessions. For example, "feature/" produces "feature/my-session".
+	// Set to "" to disable auto-prefixing (just the session name).
+	// Default: "feature/" when not set.
+	BranchPrefix *string `toml:"branch_prefix"`
 }
 
 // Template returns the path template if set, or empty string if nil.
@@ -568,6 +666,14 @@ func (w *WorktreeSettings) Template() string {
 		return ""
 	}
 	return *w.PathTemplate
+}
+
+// Prefix returns the branch prefix if set, or "feature/" if nil.
+func (w *WorktreeSettings) Prefix() string {
+	if w.BranchPrefix == nil {
+		return "feature/"
+	}
+	return *w.BranchPrefix
 }
 
 // GlobalSearchSettings defines global conversation search configuration
@@ -645,7 +751,7 @@ type ToolDef struct {
 	// Example: env = { ANTHROPIC_BASE_URL = "https://...", API_KEY = "token" }
 	Env map[string]string `toml:"env"`
 
-	// Pattern override fields (extend built-in defaults for claude/gemini/opencode/codex)
+	// Pattern override fields (extend built-in defaults for claude/gemini/opencode/codex/pi)
 	// Patterns prefixed with "re:" are compiled as regex; everything else uses strings.Contains.
 
 	// BusyPatternsExtra appends additional busy patterns to the built-in defaults
@@ -753,7 +859,9 @@ func (m *MCPDef) HasAutoStartServer() bool {
 type TmuxSettings struct {
 	// InjectStatusLine controls whether agent-deck injects a custom status line
 	// into new tmux sessions. When false, the tmux status bar is not modified,
-	// allowing users to use their own tmux status line configuration.
+	// allowing users to use their own tmux status line configuration. This also
+	// disables Agent Deck's global tmux notification bar and key bindings so the
+	// runtime stops mutating global tmux options.
 	// Default: true (nil = use default true)
 	InjectStatusLine *bool `toml:"inject_status_line"`
 
@@ -991,6 +1099,68 @@ func ClearUserConfigCache() {
 	userConfigCacheMu.Unlock()
 }
 
+// IsClaudeCompatible returns true if the tool is "claude" or a custom tool
+// whose underlying command is "claude". Use this for capability gates
+// (session tracking, MCP, skills, hooks, etc.) where custom tools wrapping
+// Claude should get full Claude functionality.
+func IsClaudeCompatible(toolName string) bool {
+	if toolName == "claude" {
+		return true
+	}
+	if def := GetToolDef(toolName); def != nil {
+		return isClaudeCommand(def.Command)
+	}
+	return false
+}
+
+func isClaudeCommand(command string) bool {
+	fields := strings.Fields(strings.TrimSpace(command))
+	if len(fields) == 0 {
+		return false
+	}
+
+	cmdToken := ""
+	for _, field := range fields {
+		if isShellEnvAssignment(field) {
+			continue
+		}
+		cmdToken = strings.Trim(field, `"'`)
+		break
+	}
+	if cmdToken == "" {
+		return false
+	}
+
+	base := filepath.Base(cmdToken)
+	base = strings.TrimSuffix(base, ".exe")
+	base = strings.TrimSuffix(base, ".EXE")
+	return strings.EqualFold(base, "claude")
+}
+
+func isShellEnvAssignment(token string) bool {
+	if token == "" {
+		return false
+	}
+	idx := strings.IndexByte(token, '=')
+	if idx <= 0 {
+		return false
+	}
+
+	key := token[:idx]
+	for i, r := range key {
+		if i == 0 {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_') {
+				return false
+			}
+			continue
+		}
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // GetToolDef returns a tool definition from user config
 // Returns nil if tool is not defined
 func GetToolDef(toolName string) *ToolDef {
@@ -1006,7 +1176,7 @@ func GetToolDef(toolName string) *ToolDef {
 }
 
 // GetCustomToolNames returns sorted custom tool names from config.toml,
-// excluding names that shadow built-in tools (claude, gemini, opencode, codex, shell, cursor, aider).
+// excluding names that shadow built-in tools (claude, gemini, opencode, codex, copilot, pi, shell, cursor, aider).
 // Returns nil if no custom tools are configured.
 func GetCustomToolNames() []string {
 	config, err := LoadUserConfig()
@@ -1016,7 +1186,7 @@ func GetCustomToolNames() []string {
 
 	builtins := map[string]bool{
 		"claude": true, "gemini": true, "opencode": true,
-		"codex": true, "copilot": true, "shell": true, "cursor": true, "aider": true,
+		"codex": true, "copilot": true, "pi": true, "shell": true, "cursor": true, "aider": true,
 	}
 
 	var names []string
@@ -1051,6 +1221,8 @@ func GetToolIcon(toolName string) string {
 		return "💻"
 	case "copilot":
 		return "🛸"
+	case "pi":
+		return "π"
 	case "cursor":
 		return "📝"
 	case "shell":
@@ -1118,6 +1290,20 @@ func GetDefaultTool() string {
 		return ""
 	}
 	return config.DefaultTool
+}
+
+// GetHotkeyOverrides returns user-configured hotkey overrides from config.toml.
+// Returns nil when unset.
+func GetHotkeyOverrides() map[string]string {
+	config, err := LoadUserConfig()
+	if err != nil || config == nil || len(config.Hotkeys) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(config.Hotkeys))
+	for action, key := range config.Hotkeys {
+		out[action] = key
+	}
+	return out
 }
 
 // GetTheme returns the current theme, defaulting to "dark"
@@ -1424,9 +1610,25 @@ func CreateExampleConfig() error {
 
 # Default AI tool for new sessions
 # When creating a new session (pressing 'n'), this tool will be pre-selected
-# Valid values: "claude", "gemini", "opencode", "codex", "copilot", or any custom tool name
+# Valid values: "claude", "gemini", "opencode", "codex", "copilot", "pi", or any custom tool name
 # Leave commented out or empty to default to shell (no pre-selection)
 # default_tool = "claude"
+
+# Hotkey overrides (optional)
+# Action names are defined by agent-deck. Value is the key string.
+# Set value to "" to unbind an action.
+# [hotkeys]
+# delete = "d"
+# close_session = "D"
+# restart = "R"
+
+# Attach-return project path sync (optional)
+# [instances]
+# follow_cwd_on_attach = true
+
+# Preview notes/output split (optional)
+# [preview]
+# notes_output_split = 0.33
 
 # Claude Code integration
 # [claude]
@@ -1512,7 +1714,10 @@ default_location = "sibling"
 # Automatically remove worktree when session is deleted
 auto_cleanup = true
 # Custom path template (overrides default_location if set)
-# Variables: {repo-name}, {repo-root}, {branch}, {session-id}
+# Variables:
+#   {repo-name}, {repo-root}, {session-id}
+#   {branch}         -> sanitized (human-friendly, may collide)
+#   {branch-escaped} -> URL-escaped (collision-resistant, reversible)
 # path_template = "../worktrees/{repo-name}/{branch}"
 
 # Default scope for MCP operations: "local", "global", or "user"
@@ -1530,7 +1735,8 @@ auto_cleanup = true
 # Controls how agent-deck configures tmux sessions
 # [tmux]
 # inject_status_line controls whether agent-deck sets up a custom tmux status bar
-# When false, your existing tmux status line configuration is preserved
+# When false, your existing tmux status line configuration is preserved and
+# agent-deck stops mutating the global tmux notification bar / number key bindings
 # Default: true (agent-deck injects its own status bar with session info)
 # inject_status_line = false
 # Override tmux options applied to every session (applied after defaults)
@@ -1653,7 +1859,7 @@ auto_cleanup = true
 # ============================================================================
 # Status Detection Pattern Overrides (Advanced)
 # ============================================================================
-# Built-in tools (claude, gemini, opencode, codex) have default detection
+# Built-in tools (claude, gemini, opencode, codex, pi) have default detection
 # patterns that work out of the box. You can extend them with *_extra fields
 # (appended to defaults) or replace them entirely with the base fields.
 # Patterns prefixed with "re:" are compiled as regex.

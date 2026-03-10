@@ -21,8 +21,9 @@ func TestMarshalUnmarshalToolData_CopilotFields(t *testing.T) {
 		"", time.Time{}, // opencode
 		"", time.Time{}, // codex
 		copilotID, copilotDetected,
-		"latest prompt", []string{"mcp1"},
+		"latest prompt", "session notes", []string{"mcp1"},
 		nil, // toolOptionsJSON
+		"ssh.example", "/remote/project",
 	)
 
 	if len(data) == 0 {
@@ -36,8 +37,8 @@ func TestMarshalUnmarshalToolData_CopilotFields(t *testing.T) {
 		_, _,
 		_, _,
 		gotCopilotID, gotCopilotDetected,
-		gotPrompt, gotMCPs,
-		_ := UnmarshalToolData(data)
+		gotPrompt, gotNotes, gotMCPs,
+		_, gotSSHHost, gotSSHRemotePath := UnmarshalToolData(data)
 
 	if gotCopilotID != copilotID {
 		t.Errorf("CopilotSessionID: got %q, want %q", gotCopilotID, copilotID)
@@ -55,8 +56,17 @@ func TestMarshalUnmarshalToolData_CopilotFields(t *testing.T) {
 	if gotPrompt != "latest prompt" {
 		t.Errorf("LatestPrompt: got %q, want %q", gotPrompt, "latest prompt")
 	}
+	if gotNotes != "session notes" {
+		t.Errorf("Notes: got %q, want %q", gotNotes, "session notes")
+	}
 	if len(gotMCPs) != 1 || gotMCPs[0] != "mcp1" {
 		t.Errorf("LoadedMCPNames: got %v, want [mcp1]", gotMCPs)
+	}
+	if gotSSHHost != "ssh.example" {
+		t.Errorf("SSHHost: got %q, want %q", gotSSHHost, "ssh.example")
+	}
+	if gotSSHRemotePath != "/remote/project" {
+		t.Errorf("SSHRemotePath: got %q, want %q", gotSSHRemotePath, "/remote/project")
 	}
 }
 
@@ -69,8 +79,9 @@ func TestMarshalUnmarshalToolData_CopilotEmpty(t *testing.T) {
 		"", time.Time{},
 		"", time.Time{},
 		"", time.Time{}, // copilot: empty
-		"", nil,
+		"", "", nil,
 		nil,
+		"", "",
 	)
 
 	_, _,
@@ -79,8 +90,8 @@ func TestMarshalUnmarshalToolData_CopilotEmpty(t *testing.T) {
 		_, _,
 		_, _,
 		copilotID, copilotDetected,
-		_, _,
-		_ := UnmarshalToolData(data)
+		_, _, _,
+		_, _, _ := UnmarshalToolData(data)
 
 	if copilotID != "" {
 		t.Errorf("expected empty CopilotSessionID, got %q", copilotID)
@@ -100,8 +111,9 @@ func TestMarshalUnmarshalToolData_CopilotWithToolOptions(t *testing.T) {
 		"", time.Time{},
 		"", time.Time{},
 		"copilot-sess-xyz", time.Date(2026, 2, 28, 15, 30, 0, 0, time.UTC),
-		"", nil,
+		"", "", nil,
 		toolOpts,
+		"", "",
 	)
 
 	_, _,
@@ -110,8 +122,8 @@ func TestMarshalUnmarshalToolData_CopilotWithToolOptions(t *testing.T) {
 		_, _,
 		_, _,
 		gotCopilotID, gotCopilotDetected,
-		_, _,
-		gotToolOpts := UnmarshalToolData(data)
+		_, _, _,
+		gotToolOpts, _, _ := UnmarshalToolData(data)
 
 	if gotCopilotID != "copilot-sess-xyz" {
 		t.Errorf("CopilotSessionID: got %q, want %q", gotCopilotID, "copilot-sess-xyz")
@@ -143,8 +155,8 @@ func TestUnmarshalToolData_EmptyData(t *testing.T) {
 		_, _,
 		_, _,
 		copilotID, copilotDetected,
-		_, _,
-		_ := UnmarshalToolData(nil)
+		_, _, _,
+		_, _, _ := UnmarshalToolData(nil)
 
 	if copilotID != "" {
 		t.Errorf("expected empty CopilotSessionID from nil data, got %q", copilotID)

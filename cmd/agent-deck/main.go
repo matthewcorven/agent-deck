@@ -29,7 +29,7 @@ import (
 	"github.com/asheshgoplani/agent-deck/internal/web"
 )
 
-const Version = "0.19.19"
+const Version = "0.24.1"
 
 // Table column widths for list command output
 const (
@@ -249,6 +249,12 @@ func main() {
 			return
 		case "conductor":
 			handleConductor(profile, args[1:])
+			return
+		case "openclaw", "oc":
+			handleOpenClaw(profile, args[1:])
+			return
+		case "remote":
+			handleRemote(profile, args[1:])
 			return
 		case "worktree", "wt":
 			handleWorktree(profile, args[1:])
@@ -529,6 +535,8 @@ func reorderArgsForFlagParsing(args []string) []string {
 		"--location":       true,
 		"--resume-session": true,
 		"--sandbox-image":  true,
+		"--ssh":            true,
+		"--remote-path":    true,
 	}
 
 	var flags []string
@@ -684,7 +692,7 @@ func handleAdd(profile string, args []string) {
 	)
 	parent := fs.String("parent", "", "Parent session (creates sub-session, inherits group)")
 	parentShort := fs.String("p", "", "Parent session (short)")
-	noParent := fs.Bool("no-parent", false, "Disable automatic parent linking")
+	noParent := fs.Bool("no-parent", false, "Disable automatic parent linking (use 'session set-parent' later to link manually)")
 	quickCreate := fs.Bool("quick", false, "Auto-generate session name (adjective-noun)")
 	quickCreateShort := fs.Bool("Q", false, "Auto-generate session name (short)")
 	jsonOutput := fs.Bool("json", false, "Output as JSON")
@@ -709,8 +717,14 @@ func handleAdd(profile string, args []string) {
 	sandbox := fs.Bool("sandbox", false, "Run session in Docker sandbox")
 	sandboxImage := fs.String("sandbox-image", "", "Docker image for sandbox (overrides config default)")
 
+	// SSH remote flags
+	sshHost := fs.String("ssh", "", "SSH destination (e.g., user@host)")
+	sshRemotePath := fs.String("remote-path", "", "Remote working directory (used with --ssh)")
+
 	// Resume session flag
 	resumeSession := fs.String("resume-session", "", "Claude session ID to resume (skips new session creation)")
+	yoloMode := fs.Bool("yolo", false, "Enable Gemini YOLO mode for this session")
+	geminiYoloMode := fs.Bool("gemini-yolo", false, "Enable Gemini YOLO mode for this session")
 
 	fs.Usage = func() {
 		fmt.Println("Usage: agent-deck add [path] [options]")
@@ -733,6 +747,8 @@ func handleAdd(profile string, args []string) {
 		fmt.Println("  agent-deck add -t \"Research\" -c claude --mcp memory --mcp sequential-thinking /tmp/x")
 		fmt.Println("  agent-deck add -c opencode --wrapper \"nvim +'terminal {command}' +'startinsert'\" .")
 		fmt.Println("  agent-deck add -c \"codex --dangerously-bypass-approvals-and-sandbox\" .")
+		fmt.Println("  agent-deck add -c gemini --yolo .")
+		fmt.Println("  agent-deck add -c claude -g work .   # -c is shorthand for --cmd")
 		fmt.Println("  agent-deck add -g ard --no-parent -c claude .")
 		fmt.Println("  agent-deck add --quick -c claude .   # Auto-generated name")
 		fmt.Println()
@@ -740,6 +756,10 @@ func handleAdd(profile string, args []string) {
 		fmt.Println("  agent-deck add -w feature/login .    # Create worktree for existing branch")
 		fmt.Println("  agent-deck add -w feature/new -b .   # Create worktree with new branch")
 		fmt.Println("  agent-deck add --worktree fix/bug-123 --new-branch /path/to/repo")
+		fmt.Println()
+		fmt.Println("SSH Examples:")
+		fmt.Println("  agent-deck add --ssh user@host --remote-path ~/project -c claude")
+		fmt.Println("  agent-deck add --ssh user@host -c claude -t \"remote-dev\"")
 	}
 
 	// Reorder args: move path to end so flags are parsed correctly
@@ -858,15 +878,26 @@ func handleAdd(profile string, args []string) {
 		}
 	}
 
-	// Verify path exists and is a directory
-	info, err := os.Stat(path)
-	if err != nil {
-		fmt.Printf("Error: path does not exist: %s\n", path)
-		os.Exit(1)
-	}
-	if !info.IsDir() {
-		fmt.Printf("Error: path is not a directory: %s\n", path)
-		os.Exit(1)
+	// Verify path exists and is a directory (skip for SSH remote sessions)
+	if *sshHost != "" {
+		// For SSH sessions, use CWD as local placeholder path (project lives on remote)
+		if path == "" {
+			path, err = os.Getwd()
+			if err != nil {
+				fmt.Printf("Error: failed to get current directory: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	} else {
+		info, err := os.Stat(path)
+		if err != nil {
+			fmt.Printf("Error: path does not exist: %s\n", path)
+			os.Exit(1)
+		}
+		if !info.IsDir() {
+			fmt.Printf("Error: path is not a directory: %s\n", path)
+			os.Exit(1)
+		}
 	}
 
 	// Handle worktree creation
@@ -1001,6 +1032,16 @@ func handleAdd(profile string, args []string) {
 		newInstance.Sandbox = session.NewSandboxConfig(*sandboxImage)
 	}
 
+	// Apply SSH remote config if requested.
+	if *sshHost != "" {
+		if *sandbox {
+			fmt.Println("Error: --ssh and --sandbox cannot be used together")
+			os.Exit(1)
+		}
+		newInstance.SSHHost = *sshHost
+		newInstance.SSHRemotePath = *sshRemotePath
+	}
+
 	// Handle --resume-session: set Claude session ID and resume mode
 	if *resumeSession != "" {
 		newInstance.ClaudeSessionID = *resumeSession
@@ -1016,6 +1057,11 @@ func handleAdd(profile string, args []string) {
 		if err := newInstance.SetClaudeOptions(opts); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to set resume options: %v\n", err)
 		}
+	}
+
+	if err := applyGeminiCLIYoloOverride(newInstance, *yoloMode || *geminiYoloMode); err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Add to instances
@@ -1083,6 +1129,12 @@ func handleAdd(profile string, args []string) {
 	if worktreePath != "" {
 		humanLines = append(humanLines, fmt.Sprintf("  Worktree: %s (branch: %s)", worktreePath, wtBranch))
 		humanLines = append(humanLines, fmt.Sprintf("  Repo:    %s", worktreeRepoRoot))
+	}
+	if *sshHost != "" {
+		humanLines = append(humanLines, fmt.Sprintf("  SSH:     %s", *sshHost))
+		if *sshRemotePath != "" {
+			humanLines = append(humanLines, fmt.Sprintf("  Remote:  %s", *sshRemotePath))
+		}
 	}
 	if *resumeSession != "" {
 		humanLines = append(humanLines, fmt.Sprintf("  Resume:  %s", *resumeSession))
@@ -1195,29 +1247,33 @@ func handleList(profile string, args []string) {
 	if *jsonOutput {
 		// JSON output for scripting
 		type sessionJSON struct {
-			ID        string    `json:"id"`
-			Title     string    `json:"title"`
-			Path      string    `json:"path"`
-			Group     string    `json:"group"`
-			Tool      string    `json:"tool"`
-			Command   string    `json:"command,omitempty"`
-			Status    string    `json:"status"`
-			Profile   string    `json:"profile"`
-			CreatedAt time.Time `json:"created_at"`
+			ID            string    `json:"id"`
+			Title         string    `json:"title"`
+			Path          string    `json:"path"`
+			Group         string    `json:"group"`
+			Tool          string    `json:"tool"`
+			Command       string    `json:"command,omitempty"`
+			Status        string    `json:"status"`
+			Profile       string    `json:"profile"`
+			CreatedAt     time.Time `json:"created_at"`
+			SSHHost       string    `json:"ssh_host,omitempty"`
+			SSHRemotePath string    `json:"ssh_remote_path,omitempty"`
 		}
 		sessions := make([]sessionJSON, len(instances))
 		for i, inst := range instances {
 			_ = inst.UpdateStatus()
 			sessions[i] = sessionJSON{
-				ID:        inst.ID,
-				Title:     inst.Title,
-				Path:      inst.ProjectPath,
-				Group:     inst.GroupPath,
-				Tool:      inst.Tool,
-				Command:   inst.Command,
-				Status:    StatusString(inst.Status),
-				Profile:   storage.Profile(),
-				CreatedAt: inst.CreatedAt,
+				ID:            inst.ID,
+				Title:         inst.Title,
+				Path:          inst.ProjectPath,
+				Group:         inst.GroupPath,
+				Tool:          inst.Tool,
+				Command:       inst.Command,
+				Status:        StatusString(inst.Status),
+				Profile:       storage.Profile(),
+				CreatedAt:     inst.CreatedAt,
+				SSHHost:       inst.SSHHost,
+				SSHRemotePath: inst.SSHRemotePath,
 			}
 		}
 		output, err := json.MarshalIndent(sessions, "", "  ")
@@ -1265,14 +1321,16 @@ func handleListAllProfiles(jsonOutput bool) {
 
 	if jsonOutput {
 		type sessionJSON struct {
-			ID        string    `json:"id"`
-			Title     string    `json:"title"`
-			Path      string    `json:"path"`
-			Group     string    `json:"group"`
-			Tool      string    `json:"tool"`
-			Command   string    `json:"command,omitempty"`
-			Profile   string    `json:"profile"`
-			CreatedAt time.Time `json:"created_at"`
+			ID            string    `json:"id"`
+			Title         string    `json:"title"`
+			Path          string    `json:"path"`
+			Group         string    `json:"group"`
+			Tool          string    `json:"tool"`
+			Command       string    `json:"command,omitempty"`
+			Profile       string    `json:"profile"`
+			CreatedAt     time.Time `json:"created_at"`
+			SSHHost       string    `json:"ssh_host,omitempty"`
+			SSHRemotePath string    `json:"ssh_remote_path,omitempty"`
 		}
 		var allSessions []sessionJSON
 
@@ -1287,14 +1345,16 @@ func handleListAllProfiles(jsonOutput bool) {
 			}
 			for _, inst := range instances {
 				allSessions = append(allSessions, sessionJSON{
-					ID:        inst.ID,
-					Title:     inst.Title,
-					Path:      inst.ProjectPath,
-					Group:     inst.GroupPath,
-					Tool:      inst.Tool,
-					Command:   inst.Command,
-					Profile:   profileName,
-					CreatedAt: inst.CreatedAt,
+					ID:            inst.ID,
+					Title:         inst.Title,
+					Path:          inst.ProjectPath,
+					Group:         inst.GroupPath,
+					Tool:          inst.Tool,
+					Command:       inst.Command,
+					Profile:       profileName,
+					CreatedAt:     inst.CreatedAt,
+					SSHHost:       inst.SSHHost,
+					SSHRemotePath: inst.SSHRemotePath,
 				})
 			}
 		}
@@ -2000,6 +2060,9 @@ func handleUpdate(args []string) {
 
 	fmt.Printf("\n✓ Updated to v%s\n", info.LatestVersion)
 	fmt.Println("  Restart agent-deck to use the new version.")
+
+	// Offer to update remotes
+	updateRemotesAfterLocalUpdate(info.LatestVersion)
 }
 
 func runHomebrewUpgradeWithRefresh(homebrewUpgradeCmd string) error {
